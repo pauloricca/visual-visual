@@ -1,0 +1,48 @@
+#!/usr/bin/env sh
+set -eu
+
+URL="http://localhost:5173/"
+
+cleanup() {
+  docker compose down
+}
+
+trap cleanup INT TERM EXIT
+
+docker compose up --build &
+COMPOSE_PID="$!"
+
+READY=0
+if command -v curl >/dev/null 2>&1; then
+  i=0
+  while [ "$i" -lt 60 ]; do
+    if docker compose ps --status running --services | grep -qx web &&
+      curl -fsS "$URL" >/dev/null 2>&1; then
+      READY=1
+      break
+    fi
+    i=$((i + 1))
+    sleep 1
+  done
+else
+  sleep 2
+  if docker compose ps --status running --services | grep -qx web; then
+    READY=1
+  fi
+fi
+
+if [ "$READY" -eq 1 ]; then
+  if command -v open >/dev/null 2>&1; then
+    open "$URL"
+  elif command -v xdg-open >/dev/null 2>&1; then
+    xdg-open "$URL" >/dev/null 2>&1 &
+  else
+    printf 'Open %s in your browser.\n' "$URL"
+  fi
+
+  printf 'Visual Visual is running at %s\n' "$URL"
+else
+  printf 'Visual Visual did not become ready; browser was not opened.\n' >&2
+fi
+
+wait "$COMPOSE_PID"

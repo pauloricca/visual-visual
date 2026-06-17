@@ -1,0 +1,466 @@
+:root {
+  color: #f5f5f5;
+  background: #000;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 13px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+}
+
+button,
+select,
+input,
+textarea {
+  border: 1px solid #fff;
+  border-radius: 0;
+  background: #000;
+  color: #fff;
+  font: inherit;
+}
+
+button,
+select {
+  height: 28px;
+  padding: 0 8px;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:hover,
+select:hover {
+  background: #fff;
+  color: #000;
+}
+
+.app-shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 420px;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #000;
+}
+
+.app-shell-panel-closed {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.editor-shell {
+  position: relative;
+  min-width: 0;
+  border-right: 1px solid #fff;
+  background: #000;
+  isolation: isolate;
+}
+
+.app-shell-panel-closed .editor-shell {
+  border-right: 0;
+}
+
+.side-panel-toggle {
+  position: absolute;
+  z-index: 20;
+  top: 10px;
+  right: 10px;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid #fff;
+  background: #000;
+  color: #fff;
+  line-height: 26px;
+  text-align: center;
+}
+
+.side-panel-toggle:hover,
+.side-panel-toggle:focus {
+  background: #fff;
+  color: #000;
+  outline: 0;
+}
+
+.webgl-preview {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  pointer-events: none;
+  image-rendering: pixelated;
+}
+
+.webgl-error {
+  position: absolute;
+  z-index: 3;
+  right: 12px;
+  bottom: 12px;
+  max-width: min(520px, calc(100% - 24px));
+  max-height: 160px;
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid #ff7474;
+  background: #000;
+  color: #ff7474;
+  pointer-events: none;
+  white-space: pre-wrap;
+}
+
+.react-flow {
+  position: relative;
+  z-index: 1;
+  background: transparent;
+}
+
+.react-flow__renderer,
+.react-flow__pane {
+  background: transparent;
+}
+
+.react-flow__controls,
+.react-flow__minimap {
+  border: 1px solid #fff;
+  border-radius: 0;
+  background: #000;
+}
+
+.react-flow__controls-button {
+  border-bottom: 1px solid #fff;
+  background: #000;
+  color: #fff;
+  fill: #fff;
+}
+
+.react-flow__minimap-mask {
+  fill: rgba(255, 255, 255, 0.08);
+}
+
+.react-flow__minimap-node {
+  fill: #fff;
+}
+
+.shader-node {
+  position: relative;
+  min-width: 168px;
+  border: 1px solid #fff;
+  background: #000;
+  color: #fff;
+  box-shadow: none;
+  overflow: visible;
+}
+
+.shader-node-title {
+  position: relative;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  min-height: 31px;
+  padding: 4px 8px;
+  border-bottom: 1px solid #fff;
+  background: #fff;
+  color: #000;
+  font-weight: 700;
+}
+
+.node-type-picker-button {
+  display: block;
+  min-width: 72px;
+  height: 22px;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  background: transparent;
+  color: #000;
+  cursor: text;
+  font-weight: 700;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.node-type-picker-button:hover,
+.node-type-picker-button:focus {
+  background: #000;
+  color: #fff;
+  outline: 0;
+}
+
+.node-type-picker {
+  position: relative;
+  z-index: 30;
+  min-width: 112px;
+}
+
+.node-type-picker-input {
+  display: block;
+  width: 112px;
+  height: 22px;
+  padding: 0 4px;
+  border: 1px solid #000;
+  background: #fff;
+  color: #000;
+  font: inherit;
+  font-weight: 700;
+}
+
+.node-type-picker-input::selection {
+  background: #000;
+  color: #fff;
+}
+
+.node-type-picker-menu {
+  position: absolute;
+  top: calc(100% + 5px);
+  left: 0;
+  width: 144px;
+  max-height: 220px;
+  overflow: auto;
+  border: 1px solid #fff;
+  background: #000;
+  color: #fff;
+  box-shadow: 0 0 0 1px #000;
+}
+
+.node-type-picker-menu button,
+.node-type-picker-empty {
+  display: block;
+  width: 100%;
+  height: 24px;
+  padding: 0 6px;
+  border: 0;
+  border-bottom: 1px solid #333;
+  background: #000;
+  color: #fff;
+  font: inherit;
+  text-align: left;
+}
+
+.node-type-picker-menu button.active,
+.node-type-picker-menu button:hover {
+  background: #fff;
+  color: #000;
+}
+
+.node-type-picker-empty {
+  color: #777;
+}
+
+.shader-node-id {
+  overflow: hidden;
+  max-width: 80px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 400;
+}
+
+.shader-node-body {
+  display: grid;
+  grid-template-columns: minmax(112px, 1fr) 64px;
+  gap: 10px;
+  min-height: 44px;
+  padding: 8px;
+}
+
+.shader-ports {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.shader-port {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 26px;
+}
+
+.shader-port-input {
+  gap: 6px;
+}
+
+.shader-port-input span {
+  width: 58px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.numeric-scrubber {
+  width: 68px;
+  height: 22px;
+  padding: 0 4px;
+  border: 1px solid #fff;
+  background: #000;
+  color: #fff;
+  cursor: ns-resize;
+  line-height: 20px;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: clip;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.numeric-scrubber:focus {
+  outline: 1px solid #fff;
+  outline-offset: 1px;
+}
+
+.numeric-scrubber-editing {
+  display: block;
+  cursor: text;
+  font: inherit;
+  user-select: text;
+  -moz-appearance: textfield;
+}
+
+.numeric-scrubber-editing::selection {
+  background: #fff;
+  color: #000;
+}
+
+.shader-port-output {
+  justify-content: flex-end;
+  padding-right: 4px;
+}
+
+.shader-port-output span {
+  overflow: hidden;
+  max-width: 58px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shader-handle {
+  width: 8px;
+  height: 8px;
+  border: 1px solid #fff;
+  border-radius: 0;
+  background: #000;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.shader-handle-input {
+  left: -13px;
+}
+
+.shader-handle-output {
+  right: -13px;
+}
+
+.shader-edge .react-flow__edge-path {
+  stroke: #fff;
+  stroke-width: 1.5;
+}
+
+.export-panel {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  height: 100%;
+  background: #000;
+}
+
+.panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  border-bottom: 1px solid #fff;
+}
+
+.panel-header h1 {
+  margin: 0 0 4px;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.status {
+  margin: 0;
+}
+
+.status-ok {
+  color: #8cff8c;
+}
+
+.status-error,
+.error {
+  color: #ff7474;
+}
+
+.tabs {
+  display: flex;
+  gap: 6px;
+}
+
+.tabs .active {
+  background: #fff;
+  color: #000;
+}
+
+.messages {
+  max-height: 120px;
+  overflow: auto;
+  border-bottom: 1px solid #fff;
+}
+
+.message {
+  margin: 0;
+  padding: 6px 12px;
+  border-bottom: 1px solid #333;
+}
+
+.warning {
+  color: #ffff9a;
+}
+
+.export-panel textarea,
+.shader-preview {
+  width: 100%;
+  flex: 1;
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  border: 0;
+  outline: 0;
+  background: #000;
+  color: #fff;
+  resize: none;
+  white-space: pre;
+}
+
+.panel-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px;
+  border-top: 1px solid #fff;
+}
+
+@media (max-width: 900px) {
+  .app-shell {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(420px, 1fr) 360px;
+  }
+
+  .editor-shell {
+    border-right: 0;
+    border-bottom: 1px solid #fff;
+  }
+}

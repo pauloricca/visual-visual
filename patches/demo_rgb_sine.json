@@ -1,0 +1,165 @@
+{
+  "nodes": [
+    {
+      "id": "system",
+      "type": "System",
+      "params": {},
+      "position": {
+        "x": 40,
+        "y": 160
+      }
+    },
+    {
+      "id": "mul_x",
+      "type": "Multiply",
+      "params": {
+        "a": 0,
+        "b": 80
+      },
+      "position": {
+        "x": 300,
+        "y": 80
+      }
+    },
+    {
+      "id": "sin_x",
+      "type": "Sin",
+      "params": {
+        "value": 0
+      },
+      "position": {
+        "x": 520,
+        "y": 80
+      }
+    },
+    {
+      "id": "mul_y",
+      "type": "Multiply",
+      "params": {
+        "a": 0,
+        "b": 40
+      },
+      "position": {
+        "x": 300,
+        "y": 260
+      }
+    },
+    {
+      "id": "sin_y",
+      "type": "Sin",
+      "params": {
+        "value": 0
+      },
+      "position": {
+        "x": 520,
+        "y": 260
+      }
+    },
+    {
+      "id": "sin_time",
+      "type": "Sin",
+      "params": {
+        "value": 0
+      },
+      "position": {
+        "x": 520,
+        "y": 440
+      }
+    },
+    {
+      "id": "out",
+      "type": "Output",
+      "params": {
+        "b": 0,
+        "g": 0,
+        "r": 0
+      },
+      "position": {
+        "x": 760,
+        "y": 210
+      }
+    }
+  ],
+  "links": [
+    {
+      "from": {
+        "node": "system",
+        "port": "x"
+      },
+      "to": {
+        "node": "mul_x",
+        "port": "a"
+      }
+    },
+    {
+      "from": {
+        "node": "mul_x",
+        "port": "value"
+      },
+      "to": {
+        "node": "sin_x",
+        "port": "value"
+      }
+    },
+    {
+      "from": {
+        "node": "sin_x",
+        "port": "value"
+      },
+      "to": {
+        "node": "out",
+        "port": "r"
+      }
+    },
+    {
+      "from": {
+        "node": "system",
+        "port": "y"
+      },
+      "to": {
+        "node": "mul_y",
+        "port": "a"
+      }
+    },
+    {
+      "from": {
+        "node": "mul_y",
+        "port": "value"
+      },
+      "to": {
+        "node": "sin_y",
+        "port": "value"
+      }
+    },
+    {
+      "from": {
+        "node": "sin_y",
+        "port": "value"
+      },
+      "to": {
+        "node": "out",
+        "port": "g"
+      }
+    },
+    {
+      "from": {
+        "node": "system",
+        "port": "time"
+      },
+      "to": {
+        "node": "sin_time",
+        "port": "value"
+      }
+    },
+    {
+      "from": {
+        "node": "sin_time",
+        "port": "value"
+      },
+      "to": {
+        "node": "out",
+        "port": "b"
+      }
+    }
+  ]
+}

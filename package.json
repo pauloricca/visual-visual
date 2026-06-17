@@ -1,0 +1,13 @@
+{
+  "name": "visual-visual",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "web"
+  ],
+  "scripts": {
+    "dev": "npm --workspace web run dev",
+    "build": "npm --workspace web run build",
+    "typecheck": "npm --workspace web run typecheck"
+  }
+}
