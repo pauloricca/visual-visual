@@ -9,6 +9,7 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
       { name: 'y' },
       { name: 'time' },
       { name: 'frame' },
+      { name: 'mic' },
     ],
   },
   Output: {
@@ -77,9 +78,39 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
     inputs: [
       { name: 'x', defaultValue: 0 },
       { name: 'y', defaultValue: 0 },
+      { name: 'scale', defaultValue: 12 },
       { name: 'seed', defaultValue: 0 },
     ],
     outputs: [{ name: 'value' }],
+  },
+  Delay: {
+    type: 'Delay',
+    inputs: [
+      { name: 'value', defaultValue: 0 },
+      { name: 'frames', defaultValue: 1, connectable: false },
+    ],
+    outputs: [{ name: 'value' }],
+  },
+  Envelope: {
+    type: 'Envelope',
+    inputs: [
+      { name: 'value', defaultValue: 0 },
+      { name: 'attack', defaultValue: 4 },
+      { name: 'release', defaultValue: 16 },
+    ],
+    outputs: [{ name: 'value' }],
+  },
+  Camera: {
+    type: 'Camera',
+    inputs: [
+      { name: 'x', defaultValue: 0 },
+      { name: 'y', defaultValue: 0 },
+    ],
+    outputs: [
+      { name: 'r' },
+      { name: 'g' },
+      { name: 'b' },
+    ],
   },
 };
 
@@ -91,6 +122,13 @@ export function getDefinition(type: NodeType): NodeDefinition {
 
 export function hasInput(type: NodeType, port: string): boolean {
   return NODE_DEFINITIONS[type].inputs.some((input) => input.name === port);
+}
+
+export function acceptsInputLink(type: NodeType, port: string): boolean {
+  return NODE_DEFINITIONS[type].inputs.some((input) => (
+    input.name === port &&
+    input.connectable !== false
+  ));
 }
 
 export function hasOutput(type: NodeType, port: string): boolean {

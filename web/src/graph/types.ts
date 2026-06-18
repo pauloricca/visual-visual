@@ -18,7 +18,10 @@ export type NodeType =
   | 'Min'
   | 'Max'
   | 'Clamp'
-  | 'Noise';
+  | 'Noise'
+  | 'Delay'
+  | 'Camera'
+  | 'Envelope';
 
 export interface Vec2 {
   x: number;
@@ -40,6 +43,7 @@ export interface Endpoint {
 export interface PatchLink {
   from: Endpoint;
   to: Endpoint;
+  weight?: number;
 }
 
 export interface Patch {
@@ -50,6 +54,7 @@ export interface Patch {
 export interface PortDefinition {
   name: string;
   defaultValue?: number;
+  connectable?: boolean;
 }
 
 export interface NodeDefinition {

@@ -11,10 +11,19 @@ export interface ShaderNodeData extends Record<string, unknown> {
   onTypeChange: (nodeId: string, type: NodeType) => void;
   onTypeEditStart: (nodeId: string) => void;
   onTypeEditEnd: () => void;
+  onIdChange: (nodeId: string, nextId: string) => void;
+  onPortDoubleClick: (nodeId: string, side: 'input' | 'output', port: string) => void;
   isTypePickerOpen: boolean;
 }
 
 export type ShaderFlowNode = Node<ShaderNodeData, 'shaderNode'>;
+
+export interface ShaderEdgeData extends Record<string, unknown> {
+  weight: number;
+  onWeightChange: (edgeId: string, weight: number) => void;
+}
+
+export type ShaderFlowEdge = Edge<ShaderEdgeData, 'shaderEdge'>;
 
 export interface PersistedEditorState {
   version: 1;
@@ -38,6 +47,7 @@ export interface PersistedEditorState {
     sourceHandle: string | null;
     target: string;
     targetHandle: string | null;
+    weight?: number;
   }>;
 }
 
@@ -47,6 +57,8 @@ export function toFlowNodes(
   onTypeChange: ShaderNodeData['onTypeChange'],
   onTypeEditStart: ShaderNodeData['onTypeEditStart'],
   onTypeEditEnd: ShaderNodeData['onTypeEditEnd'],
+  onIdChange: ShaderNodeData['onIdChange'],
+  onPortDoubleClick: ShaderNodeData['onPortDoubleClick'],
   editingTypeNodeId: string | null,
 ): ShaderFlowNode[] {
   return patch.nodes.map((patchNode) => ({
@@ -59,18 +71,28 @@ export function toFlowNodes(
       onTypeChange,
       onTypeEditStart,
       onTypeEditEnd,
+      onIdChange,
+      onPortDoubleClick,
       isTypePickerOpen: editingTypeNodeId === patchNode.id,
     },
   }));
 }
 
-export function toFlowEdges(patch: Patch): Edge[] {
+export function toFlowEdges(
+  patch: Patch,
+  onWeightChange: ShaderEdgeData['onWeightChange'],
+): ShaderFlowEdge[] {
   return patch.links.map((link) => ({
     id: edgeId(link),
+    type: 'shaderEdge',
     source: link.from.node,
     sourceHandle: `out:${link.from.port}`,
     target: link.to.node,
     targetHandle: `in:${link.to.port}`,
+    data: {
+      weight: link.weight ?? 1,
+      onWeightChange,
+    },
     className: 'shader-edge',
   }));
 }
@@ -81,6 +103,8 @@ export function editorStateToFlowNodes(
   onTypeChange: ShaderNodeData['onTypeChange'],
   onTypeEditStart: ShaderNodeData['onTypeEditStart'],
   onTypeEditEnd: ShaderNodeData['onTypeEditEnd'],
+  onIdChange: ShaderNodeData['onIdChange'],
+  onPortDoubleClick: ShaderNodeData['onPortDoubleClick'],
   editingTypeNodeId: string | null,
 ): ShaderFlowNode[] {
   return state.nodes.map((node) => ({
@@ -98,21 +122,31 @@ export function editorStateToFlowNodes(
       onTypeChange,
       onTypeEditStart,
       onTypeEditEnd,
+      onIdChange,
+      onPortDoubleClick,
       isTypePickerOpen: editingTypeNodeId === node.id,
     },
   }));
 }
 
-export function editorStateToFlowEdges(state: PersistedEditorState): Edge[] {
+export function editorStateToFlowEdges(
+  state: PersistedEditorState,
+  onWeightChange: ShaderEdgeData['onWeightChange'],
+): ShaderFlowEdge[] {
   return state.edges.map((edge) => ({
     ...edge,
+    type: 'shaderEdge',
+    data: {
+      weight: edge.weight ?? 1,
+      onWeightChange,
+    },
     className: 'shader-edge',
   }));
 }
 
 export function flowToEditorState(
   nodes: ShaderFlowNode[],
-  edges: Edge[],
+  edges: ShaderFlowEdge[],
   ui?: PersistedEditorState['ui'],
 ): PersistedEditorState {
   return {
@@ -130,11 +164,12 @@ export function flowToEditorState(
       sourceHandle: edge.sourceHandle ?? null,
       target: edge.target,
       targetHandle: edge.targetHandle ?? null,
+      weight: edge.data?.weight ?? 1,
     })),
   };
 }
 
-export function patchFromFlow(nodes: ShaderFlowNode[], edges: Edge[]): Patch {
+export function patchFromFlow(nodes: ShaderFlowNode[], edges: ShaderFlowEdge[]): Patch {
   const patchNodes: PatchNode[] = [];
   const typedNodeIds = new Set<string>();
   for (const node of nodes) {
@@ -170,6 +205,7 @@ export function linkFromEdge(edge: Edge): PatchLink | null {
     return {
       from: { node: edge.source, port: sourcePort.port },
       to: { node: edge.target, port: targetPort.port },
+      weight: edge.data?.weight as number | undefined,
     };
   }
 
@@ -177,6 +213,7 @@ export function linkFromEdge(edge: Edge): PatchLink | null {
     return {
       from: { node: edge.target, port: targetPort.port },
       to: { node: edge.source, port: sourcePort.port },
+      weight: edge.data?.weight as number | undefined,
     };
   }
 

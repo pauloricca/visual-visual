@@ -3,6 +3,13 @@
   background: #000;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
   font-size: 13px;
+  --surface-bg: rgba(0, 0, 0, 0.72);
+  --control-bg: rgba(0, 0, 0, 0.62);
+  --menu-bg: rgba(0, 0, 0, 0.9);
+  --viewport-inset: 14px;
+  --viewport-gap: 12px;
+  --control-size: 28px;
+  --flow-controls-width: 56px;
 }
 
 * {
@@ -23,7 +30,7 @@ input,
 textarea {
   border: 1px solid #fff;
   border-radius: 0;
-  background: #000;
+  background: var(--control-bg);
   color: #fff;
   font: inherit;
 }
@@ -45,12 +52,13 @@ select:hover {
 }
 
 .app-shell {
+  position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 420px;
   width: 100%;
   height: 100%;
   overflow: hidden;
-  background: #000;
+  background: transparent;
 }
 
 .app-shell-panel-closed {
@@ -61,7 +69,7 @@ select:hover {
   position: relative;
   min-width: 0;
   border-right: 1px solid #fff;
-  background: #000;
+  background: transparent;
   isolation: isolate;
 }
 
@@ -69,23 +77,35 @@ select:hover {
   border-right: 0;
 }
 
-.side-panel-toggle {
+.viewport-buttons {
   position: absolute;
   z-index: 20;
-  top: 10px;
-  right: 10px;
-  width: 28px;
-  height: 28px;
+  top: var(--viewport-inset);
+  right: var(--viewport-inset);
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.viewport-button {
+  width: var(--control-size);
+  height: var(--control-size);
   padding: 0;
   border: 1px solid #fff;
-  background: #000;
+  background: var(--surface-bg);
   color: #fff;
   line-height: 26px;
   text-align: center;
 }
 
-.side-panel-toggle:hover,
-.side-panel-toggle:focus {
+.viewport-button-ui {
+  width: auto;
+  min-width: var(--control-size);
+  padding: 0 8px;
+}
+
+.viewport-button:hover,
+.viewport-button:focus {
   background: #fff;
   color: #000;
   outline: 0;
@@ -112,10 +132,25 @@ select:hover {
   overflow: auto;
   padding: 8px;
   border: 1px solid #ff7474;
-  background: #000;
+  background: var(--surface-bg);
   color: #ff7474;
   pointer-events: none;
   white-space: pre-wrap;
+}
+
+.fps-counter {
+  position: absolute;
+  z-index: 20;
+  bottom: var(--viewport-inset);
+  left: calc(var(--viewport-inset) + var(--flow-controls-width) + var(--viewport-gap));
+  height: var(--control-size);
+  min-width: 72px;
+  padding: 0 8px;
+  border: 1px solid #fff;
+  background: var(--surface-bg);
+  color: #fff;
+  line-height: 26px;
+  pointer-events: none;
 }
 
 .react-flow {
@@ -133,14 +168,34 @@ select:hover {
 .react-flow__minimap {
   border: 1px solid #fff;
   border-radius: 0;
-  background: #000;
+  background: var(--surface-bg);
+}
+
+.react-flow__controls {
+  left: var(--viewport-inset) !important;
+  bottom: var(--viewport-inset) !important;
+  z-index: 30;
+  display: flex;
+  visibility: visible;
+  opacity: 1;
+}
+
+.react-flow__minimap {
+  right: var(--viewport-inset) !important;
+  bottom: var(--viewport-inset) !important;
+  margin: 0 !important;
 }
 
 .react-flow__controls-button {
   border-bottom: 1px solid #fff;
-  background: #000;
+  background: transparent;
   color: #fff;
   fill: #fff;
+}
+
+.react-flow__selection {
+  border: 1px solid #fff;
+  background: rgba(255, 255, 255, 0.12);
 }
 
 .react-flow__minimap-mask {
@@ -151,14 +206,46 @@ select:hover {
   fill: #fff;
 }
 
+.app-shell-ui-hidden .react-flow__nodes,
+.app-shell-ui-hidden .react-flow__edges,
+.app-shell-ui-hidden .react-flow__edgelabel-renderer,
+.app-shell-ui-hidden .react-flow__controls,
+.app-shell-ui-hidden .react-flow__minimap,
+.app-shell-ui-hidden .fps-counter,
+.app-shell-ui-hidden .side-panel-toggle,
+.app-shell-ui-hidden .viewport-buttons .viewport-button:not(.viewport-button-ui) {
+  display: none;
+}
+
+.app-shell-ui-hidden .viewport-buttons {
+  z-index: 40;
+}
+
+.app-shell-ui-hidden .editor-shell {
+  border: 0;
+}
+
 .shader-node {
   position: relative;
   min-width: 168px;
   border: 1px solid #fff;
-  background: #000;
+  background: var(--surface-bg);
   color: #fff;
   box-shadow: none;
   overflow: visible;
+}
+
+.react-flow__node.selected .shader-node,
+.shader-node-selected {
+  outline: 2px solid #fff;
+  outline-offset: 4px;
+  box-shadow: 0 0 0 1px #000, 0 0 0 6px rgba(255, 255, 255, 0.28);
+}
+
+.react-flow__node.selected .shader-node-title,
+.shader-node-selected .shader-node-title {
+  background: #ffff8a;
+  color: #000;
 }
 
 .shader-node-title {
@@ -193,7 +280,7 @@ select:hover {
 
 .node-type-picker-button:hover,
 .node-type-picker-button:focus {
-  background: #000;
+  background: var(--surface-bg);
   color: #fff;
   outline: 0;
 }
@@ -217,7 +304,7 @@ select:hover {
 }
 
 .node-type-picker-input::selection {
-  background: #000;
+  background: rgba(0, 0, 0, 0.72);
   color: #fff;
 }
 
@@ -228,8 +315,9 @@ select:hover {
   width: 144px;
   max-height: 220px;
   overflow: auto;
+  overscroll-behavior: contain;
   border: 1px solid #fff;
-  background: #000;
+  background: var(--menu-bg);
   color: #fff;
   box-shadow: 0 0 0 1px #000;
 }
@@ -242,7 +330,7 @@ select:hover {
   padding: 0 6px;
   border: 0;
   border-bottom: 1px solid #333;
-  background: #000;
+  background: transparent;
   color: #fff;
   font: inherit;
   text-align: left;
@@ -258,12 +346,45 @@ select:hover {
   color: #777;
 }
 
-.shader-node-id {
+.shader-node-id,
+.shader-node-id-input {
   overflow: hidden;
   max-width: 80px;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-weight: 400;
+}
+
+.shader-node-id {
+  display: block;
+  width: auto;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: text;
+  line-height: 22px;
+  text-align: right;
+}
+
+.shader-node-id:hover,
+.shader-node-id:focus {
+  background: rgba(0, 0, 0, 0.14);
+  color: inherit;
+  outline: 1px solid currentColor;
+  outline-offset: 1px;
+}
+
+.shader-node-id-input {
+  width: 92px;
+  height: 22px;
+  padding: 0 4px;
+  border: 1px solid #000;
+  background: #fff;
+  color: #000;
+  font: inherit;
+  text-align: right;
 }
 
 .shader-node-body {
@@ -272,6 +393,11 @@ select:hover {
   gap: 10px;
   min-height: 44px;
   padding: 8px;
+}
+
+.shader-node-body-draft {
+  grid-template-columns: minmax(52px, 1fr) 52px;
+  min-height: 26px;
 }
 
 .shader-ports {
@@ -303,7 +429,7 @@ select:hover {
   height: 22px;
   padding: 0 4px;
   border: 1px solid #fff;
-  background: #000;
+  background: transparent;
   color: #fff;
   cursor: ns-resize;
   line-height: 20px;
@@ -349,7 +475,7 @@ select:hover {
   height: 8px;
   border: 1px solid #fff;
   border-radius: 0;
-  background: #000;
+  background: var(--control-bg);
   top: 50%;
   transform: translateY(-50%);
 }
@@ -362,33 +488,81 @@ select:hover {
   right: -13px;
 }
 
-.shader-edge .react-flow__edge-path {
+.shader-edge .react-flow__edge-path,
+.shader-edge-path {
   stroke: #fff;
   stroke-width: 1.5;
+}
+
+.shader-edge-feedback .react-flow__edge-path,
+.shader-edge-feedback.shader-edge-path {
+  stroke: #ffe45c;
+}
+
+.react-flow__edge.selected .react-flow__edge-path,
+.shader-edge-path-selected {
+  stroke: #8fd7ff;
+  stroke-width: 2.5;
+}
+
+.edge-weight-label {
+  position: absolute;
+  z-index: 40;
+  pointer-events: all;
+}
+
+.edge-weight-scrubber {
+  width: 68px;
+  height: 22px;
+  padding: 0 4px;
+  border: 1px solid #8fd7ff;
+  background: var(--surface-bg);
+  color: #fff;
+  cursor: ns-resize;
+  line-height: 20px;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: clip;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.edge-weight-scrubber:focus {
+  outline: 1px solid #8fd7ff;
+  outline-offset: 1px;
+}
+
+.edge-weight-scrubber-editing {
+  display: block;
+  cursor: text;
+  font: inherit;
+  user-select: text;
+  -moz-appearance: textfield;
+}
+
+.edge-weight-scrubber-editing::selection {
+  background: #fff;
+  color: #000;
 }
 
 .export-panel {
   position: relative;
   display: flex;
   min-width: 0;
+  min-height: 0;
   flex-direction: column;
   height: 100%;
-  background: #000;
+  overflow: hidden;
+  background: var(--surface-bg);
 }
 
 .panel-header {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
   padding: 12px;
   border-bottom: 1px solid #fff;
-}
-
-.panel-header h1 {
-  margin: 0 0 4px;
-  font-size: 18px;
-  line-height: 1;
 }
 
 .status {
@@ -402,16 +576,6 @@ select:hover {
 .status-error,
 .error {
   color: #ff7474;
-}
-
-.tabs {
-  display: flex;
-  gap: 6px;
-}
-
-.tabs .active {
-  background: #fff;
-  color: #000;
 }
 
 .messages {
@@ -430,27 +594,18 @@ select:hover {
   color: #ffff9a;
 }
 
-.export-panel textarea,
 .shader-preview {
   width: 100%;
   flex: 1;
+  min-height: 0;
   margin: 0;
   padding: 12px;
   overflow: auto;
   border: 0;
   outline: 0;
-  background: #000;
+  background: transparent;
   color: #fff;
-  resize: none;
   white-space: pre;
-}
-
-.panel-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  padding: 10px;
-  border-top: 1px solid #fff;
 }
 
 @media (max-width: 900px) {

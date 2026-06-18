@@ -1,19 +1,15 @@
-import { Handle, Position } from '@xyflow/react';
+import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
 import { getDefinition, NODE_TYPE_LIST } from '../graph/nodeTypes';
 import type { NodeType, PatchNode } from '../graph/types';
-import type { ShaderNodeData } from './flowPatch';
+import type { ShaderFlowNode, ShaderNodeData } from './flowPatch';
 
-interface Props {
-  data: ShaderNodeData;
-}
-
-export function ShaderNode({ data }: Props) {
+export function ShaderNode({ data, selected }: NodeProps<ShaderFlowNode>) {
   const node = data.patchNode;
   const definition = node.type ? getDefinition(node.type) : null;
 
   return (
-    <div className="shader-node">
+    <div className={selected ? 'shader-node shader-node-selected' : 'shader-node'}>
       <div className="shader-node-title">
         <NodeTypePicker
           nodeType={node.type}
@@ -22,19 +18,36 @@ export function ShaderNode({ data }: Props) {
           onClose={data.onTypeEditEnd}
           onChange={(type) => data.onTypeChange(node.id, type)}
         />
-        <span className="shader-node-id">{node.id}</span>
+        <NodeIdEditor
+          value={node.id}
+          onChange={(nextId) => data.onIdChange(node.id, nextId)}
+        />
       </div>
       {definition ? (
         <div className="shader-node-body">
           <div className="shader-ports shader-inputs">
             {definition.inputs.map((input) => (
-            <div className="shader-port shader-port-input" key={input.name}>
-              <Handle
-                id={`in:${input.name}`}
-                type="target"
-                position={Position.Left}
-                className="shader-handle shader-handle-input"
-              />
+            <div
+              className="shader-port shader-port-input"
+              key={input.name}
+              onDoubleClick={(event) => {
+                if (input.connectable === false) return;
+                event.stopPropagation();
+                data.onPortDoubleClick(node.id, 'input', input.name);
+              }}
+            >
+              {input.connectable !== false ? (
+                <Handle
+                  id={`in:${input.name}`}
+                  type="target"
+                  position={Position.Left}
+                  className="shader-handle shader-handle-input"
+                  onDoubleClick={(event) => {
+                    event.stopPropagation();
+                    data.onPortDoubleClick(node.id, 'input', input.name);
+                  }}
+                />
+              ) : null}
               <span>{input.name}</span>
               <NumericScrubber
                 value={node.params[input.name] ?? input.defaultValue ?? 0}
@@ -45,20 +58,140 @@ export function ShaderNode({ data }: Props) {
           </div>
           <div className="shader-ports shader-outputs">
             {definition.outputs.map((output) => (
-            <div className="shader-port shader-port-output" key={output.name}>
+            <div
+              className="shader-port shader-port-output"
+              key={output.name}
+              onDoubleClick={(event) => {
+                event.stopPropagation();
+                data.onPortDoubleClick(node.id, 'output', output.name);
+              }}
+            >
               <span>{output.name}</span>
               <Handle
                 id={`out:${output.name}`}
                 type="source"
                 position={Position.Right}
                 className="shader-handle shader-handle-output"
+                onDoubleClick={(event) => {
+                  event.stopPropagation();
+                  data.onPortDoubleClick(node.id, 'output', output.name);
+                }}
               />
             </div>
             ))}
           </div>
         </div>
-      ) : null}
+      ) : (
+        <div className="shader-node-body shader-node-body-draft">
+          <div className="shader-ports shader-inputs">
+            <div className="shader-port shader-port-input">
+              <Handle
+                id="in:value"
+                type="target"
+                position={Position.Left}
+                className="shader-handle shader-handle-input"
+              />
+              <span>in</span>
+            </div>
+          </div>
+          <div className="shader-ports shader-outputs">
+            <div className="shader-port shader-port-output">
+              <span>out</span>
+              <Handle
+                id="out:value"
+                type="source"
+                position={Position.Right}
+                className="shader-handle shader-handle-output"
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
+  );
+}
+
+interface NodeIdEditorProps {
+  value: string;
+  onChange: (nextId: string) => void;
+}
+
+function NodeIdEditor({ value, onChange }: NodeIdEditorProps) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (!editing) {
+      setDraft(value);
+    }
+  }, [editing, value]);
+
+  useEffect(() => {
+    if (!editing) return;
+
+    setDraft(value);
+    const animationFrame = requestAnimationFrame(() => {
+      inputRef.current?.focus({ preventScroll: true });
+      inputRef.current?.select();
+    });
+
+    return () => cancelAnimationFrame(animationFrame);
+  }, [editing, value]);
+
+  function commit() {
+    onChange(draft);
+    setEditing(false);
+  }
+
+  function cancel() {
+    setDraft(value);
+    setEditing(false);
+  }
+
+  function handleKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    event.stopPropagation();
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      commit();
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      cancel();
+    }
+  }
+
+  if (editing) {
+    return (
+      <input
+        ref={inputRef}
+        className="shader-node-id-input nodrag nopan"
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={commit}
+        onKeyDown={handleKeyDown}
+        onPointerDown={(event) => event.stopPropagation()}
+        onMouseDown={(event) => event.stopPropagation()}
+        onDoubleClick={(event) => event.stopPropagation()}
+        spellCheck={false}
+      />
+    );
+  }
+
+  return (
+    <button
+      className="shader-node-id nodrag nopan"
+      type="button"
+      onClick={(event) => {
+        event.stopPropagation();
+        setEditing(true);
+      }}
+      onMouseDown={(event) => event.stopPropagation()}
+      onDoubleClick={(event) => event.stopPropagation()}
+      title={value}
+    >
+      {value}
+    </button>
   );
 }
 
@@ -74,6 +207,7 @@ function NodeTypePicker({ nodeType, open, onOpen, onClose, onChange }: NodeTypeP
   const [query, setQuery] = useState<string>(nodeType ?? '');
   const [highlightedIndex, setHighlightedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const options = NODE_TYPE_LIST.filter((type) =>
     type.toLowerCase().includes(query.trim().toLowerCase()),
   );
@@ -104,6 +238,11 @@ function NodeTypePicker({ nodeType, open, onOpen, onClose, onChange }: NodeTypeP
       };
     }
   }, [nodeType, open]);
+
+  useEffect(() => {
+    if (!open) return;
+    optionRefs.current[highlightedIndex]?.scrollIntoView({ block: 'nearest' });
+  }, [highlightedIndex, open, options]);
 
   function choose(type: NodeType) {
     onChange(type);
@@ -151,7 +290,7 @@ function NodeTypePicker({ nodeType, open, onOpen, onClose, onChange }: NodeTypeP
   }
 
   return (
-    <div className="node-type-picker nodrag nopan" onMouseDown={(event) => event.stopPropagation()}>
+    <div className="node-type-picker nodrag nopan nowheel" onMouseDown={(event) => event.stopPropagation()}>
       <input
         ref={inputRef}
         className="node-type-picker-input"
@@ -168,11 +307,21 @@ function NodeTypePicker({ nodeType, open, onOpen, onClose, onChange }: NodeTypeP
         onDoubleClick={(event) => event.stopPropagation()}
         spellCheck={false}
       />
-      <div className="node-type-picker-menu">
+      <div
+        className="node-type-picker-menu nowheel"
+        onMouseDown={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+        }}
+        onWheel={(event) => event.stopPropagation()}
+      >
         {options.map((type, index) => (
           <button
             className={index === highlightedIndex ? 'active' : ''}
             key={type}
+            ref={(element) => {
+              optionRefs.current[index] = element;
+            }}
             type="button"
             onMouseDown={(event) => {
               event.preventDefault();

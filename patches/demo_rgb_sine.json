@@ -1,7 +1,7 @@
 {
   "nodes": [
     {
-      "id": "system",
+      "id": "system_1",
       "type": "System",
       "params": {},
       "position": {
@@ -10,7 +10,7 @@
       }
     },
     {
-      "id": "mul_x",
+      "id": "multiply_1",
       "type": "Multiply",
       "params": {
         "a": 0,
@@ -22,7 +22,7 @@
       }
     },
     {
-      "id": "sin_x",
+      "id": "sin_1",
       "type": "Sin",
       "params": {
         "value": 0
@@ -33,7 +33,7 @@
       }
     },
     {
-      "id": "mul_y",
+      "id": "multiply_2",
       "type": "Multiply",
       "params": {
         "a": 0,
@@ -45,7 +45,7 @@
       }
     },
     {
-      "id": "sin_y",
+      "id": "sin_2",
       "type": "Sin",
       "params": {
         "value": 0
@@ -56,7 +56,7 @@
       }
     },
     {
-      "id": "sin_time",
+      "id": "sin_3",
       "type": "Sin",
       "params": {
         "value": 0
@@ -67,7 +67,7 @@
       }
     },
     {
-      "id": "out",
+      "id": "output_1",
       "type": "Output",
       "params": {
         "b": 0,
@@ -83,81 +83,81 @@
   "links": [
     {
       "from": {
-        "node": "system",
+        "node": "system_1",
         "port": "x"
       },
       "to": {
-        "node": "mul_x",
+        "node": "multiply_1",
         "port": "a"
       }
     },
     {
       "from": {
-        "node": "mul_x",
+        "node": "multiply_1",
         "port": "value"
       },
       "to": {
-        "node": "sin_x",
+        "node": "sin_1",
         "port": "value"
       }
     },
     {
       "from": {
-        "node": "sin_x",
+        "node": "sin_1",
         "port": "value"
       },
       "to": {
-        "node": "out",
+        "node": "output_1",
         "port": "r"
       }
     },
     {
       "from": {
-        "node": "system",
+        "node": "system_1",
         "port": "y"
       },
       "to": {
-        "node": "mul_y",
+        "node": "multiply_2",
         "port": "a"
       }
     },
     {
       "from": {
-        "node": "mul_y",
+        "node": "multiply_2",
         "port": "value"
       },
       "to": {
-        "node": "sin_y",
+        "node": "sin_2",
         "port": "value"
       }
     },
     {
       "from": {
-        "node": "sin_y",
+        "node": "sin_2",
         "port": "value"
       },
       "to": {
-        "node": "out",
+        "node": "output_1",
         "port": "g"
       }
     },
     {
       "from": {
-        "node": "system",
+        "node": "system_1",
         "port": "time"
       },
       "to": {
-        "node": "sin_time",
+        "node": "sin_3",
         "port": "value"
       }
     },
     {
       "from": {
-        "node": "sin_time",
+        "node": "sin_3",
         "port": "value"
       },
       "to": {
-        "node": "out",
+        "node": "output_1",
         "port": "b"
       }
     }

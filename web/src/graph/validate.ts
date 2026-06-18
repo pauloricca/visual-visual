@@ -1,4 +1,4 @@
-import { getDefinition, hasInput, hasOutput } from './nodeTypes';
+import { acceptsInputLink, getDefinition, hasInput, hasOutput } from './nodeTypes';
 import type { Patch, PatchLink, PatchNode, ValidationResult } from './types';
 
 export function validatePatch(patch: Patch): ValidationResult {
@@ -38,14 +38,11 @@ export function validatePatch(patch: Patch): ValidationResult {
     }
     if (!hasInput(target.type, link.to.port)) {
       errors.push(`Node "${target.id}" has no input port "${link.to.port}".`);
+    } else if (!acceptsInputLink(target.type, link.to.port)) {
+      errors.push(`Node "${target.id}" input "${link.to.port}" only accepts scalar values.`);
     }
 
     inputTargets.add(endpointKey(link.to));
-  }
-
-  const cycle = findCycle(patch, nodes);
-  if (cycle) {
-    errors.push(`Graph contains a cycle: ${cycle.join(' -> ')}.`);
   }
 
   const output = outputs[0];
@@ -73,42 +70,71 @@ export function incomingLinksByInput(links: PatchLink[]): Map<string, PatchLink[
   return incoming;
 }
 
-function findCycle(patch: Patch, nodes: Map<string, PatchNode>): string[] | null {
-  const edges = new Map<string, string[]>();
+export function findFeedbackLinks(patch: Patch): PatchLink[] {
+  const nodes = new Map(patch.nodes.map((node) => [node.id, node]));
+  const orderedNodes = [...patch.nodes].sort(compareNodesByPosition);
+  const outgoing = new Map<string, PatchLink[]>();
   for (const node of patch.nodes) {
-    edges.set(node.id, []);
+    outgoing.set(node.id, []);
   }
   for (const link of patch.links) {
     if (nodes.has(link.from.node) && nodes.has(link.to.node)) {
-      edges.get(link.from.node)?.push(link.to.node);
+      outgoing.get(link.from.node)?.push(link);
     }
   }
 
+  const feedback = new Map<string, PatchLink>();
   const state = new Map<string, 'visiting' | 'done'>();
-  const stack: string[] = [];
 
-  function visit(nodeId: string): string[] | null {
-    if (state.get(nodeId) === 'visiting') {
-      const start = stack.indexOf(nodeId);
-      return [...stack.slice(start), nodeId];
-    }
+  function visit(nodeId: string): void {
     if (state.get(nodeId) === 'done') {
-      return null;
+      return;
     }
+
     state.set(nodeId, 'visiting');
-    stack.push(nodeId);
-    for (const next of edges.get(nodeId) ?? []) {
-      const cycle = visit(next);
-      if (cycle) return cycle;
+
+    const links = [...(outgoing.get(nodeId) ?? [])].sort((a, b) =>
+      compareNodesByPosition(nodes.get(a.to.node), nodes.get(b.to.node)),
+    );
+    for (const link of links) {
+      const nextState = state.get(link.to.node);
+      if (nextState === 'visiting') {
+        feedback.set(linkKey(link), link);
+        continue;
+      }
+      if (nextState !== 'done') {
+        visit(link.to.node);
+      }
     }
-    stack.pop();
+
     state.set(nodeId, 'done');
-    return null;
   }
 
-  for (const node of patch.nodes) {
-    const cycle = visit(node.id);
-    if (cycle) return cycle;
+  for (const node of orderedNodes) {
+    if (!state.has(node.id)) {
+      visit(node.id);
+    }
   }
-  return null;
+
+  return patch.links.filter((link) => feedback.has(linkKey(link)));
+}
+
+export function linkKey(link: PatchLink): string {
+  return `${link.from.node}:${link.from.port}->${link.to.node}:${link.to.port}`;
+}
+
+function compareNodesByPosition(left: PatchNode | undefined, right: PatchNode | undefined): number {
+  if (!left && !right) return 0;
+  if (!left) return 1;
+  if (!right) return -1;
+
+  const leftX = left.position?.x ?? 0;
+  const rightX = right.position?.x ?? 0;
+  if (leftX !== rightX) return leftX - rightX;
+
+  const leftY = left.position?.y ?? 0;
+  const rightY = right.position?.y ?? 0;
+  if (leftY !== rightY) return leftY - rightY;
+
+  return left.id.localeCompare(right.id);
 }
