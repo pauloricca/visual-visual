@@ -31,8 +31,11 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
   Multiply: binary('Multiply', 0, 1),
   Divide: binary('Divide', 0, 1),
   Mod: binary('Mod', 0, 1),
+  Pow: binary('Pow', 1, 1),
   Sin: unary('Sin'),
   Cos: unary('Cos'),
+  Tan: unary('Tan'),
+  Atan: unary('Atan'),
   Abs: unary('Abs'),
   Floor: unary('Floor'),
   Fract: unary('Fract'),
@@ -70,6 +73,81 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
       { name: 'value', defaultValue: 0 },
       { name: 'min', defaultValue: 0 },
       { name: 'max', defaultValue: 1 },
+    ],
+    outputs: [{ name: 'value' }],
+  },
+  Saw: oscillator('Saw'),
+  Ramp: oscillator('Ramp'),
+  Pulse: {
+    type: 'Pulse',
+    inputs: [
+      { name: 'frequency', defaultValue: 1 },
+      { name: 'phase', defaultValue: 0 },
+      { name: 'width', defaultValue: 0.5 },
+    ],
+    outputs: [{ name: 'value' }],
+  },
+  Triangle: oscillator('Triangle'),
+  Polar: {
+    type: 'Polar',
+    inputs: [
+      { name: 'radius', defaultValue: 1 },
+      { name: 'angle', defaultValue: 0 },
+    ],
+    outputs: [
+      { name: 'x' },
+      { name: 'y' },
+    ],
+  },
+  HSV: {
+    type: 'HSV',
+    inputs: [
+      { name: 'h', defaultValue: 0 },
+      { name: 's', defaultValue: 1 },
+      { name: 'v', defaultValue: 1 },
+    ],
+    outputs: [
+      { name: 'r' },
+      { name: 'g' },
+      { name: 'b' },
+    ],
+  },
+  Gate: {
+    type: 'Gate',
+    inputs: [
+      { name: 'value', defaultValue: 0 },
+      { name: 'gate', defaultValue: 0 },
+      { name: 'threshold', defaultValue: 0.5 },
+    ],
+    outputs: [{ name: 'value' }],
+  },
+  Rotate: {
+    type: 'Rotate',
+    inputs: [
+      { name: 'x', defaultValue: 0 },
+      { name: 'y', defaultValue: 0 },
+      { name: 'angle', defaultValue: 0 },
+    ],
+    outputs: [
+      { name: 'x' },
+      { name: 'y' },
+    ],
+  },
+  Quantise: {
+    type: 'Quantise',
+    inputs: [
+      { name: 'value', defaultValue: 0 },
+      { name: 'levels', defaultValue: 8 },
+    ],
+    outputs: [{ name: 'value' }],
+  },
+  Distance: {
+    type: 'Distance',
+    inputs: [
+      { name: 'x1', defaultValue: 0 },
+      { name: 'y1', defaultValue: 0 },
+      { name: 'x2', defaultValue: 0 },
+      { name: 'y2', defaultValue: 0 },
     ],
     outputs: [{ name: 'value' }],
   },
@@ -158,6 +236,17 @@ function binary(type: NodeType, a: number, b: number): NodeDefinition {
     inputs: [
       { name: 'a', defaultValue: a },
       { name: 'b', defaultValue: b },
+    ],
+    outputs: [{ name: 'value' }],
+  };
+}
+
+function oscillator(type: NodeType): NodeDefinition {
+  return {
+    type,
+    inputs: [
+      { name: 'frequency', defaultValue: 1 },
+      { name: 'phase', defaultValue: 0 },
     ],
     outputs: [{ name: 'value' }],
   };

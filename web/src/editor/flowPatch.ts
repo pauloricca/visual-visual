@@ -29,6 +29,7 @@ export interface PersistedEditorState {
   version: 1;
   ui?: {
     sidePanelOpen?: boolean;
+    exportPanelView?: 'glsl' | 'json';
     viewport?: {
       x: number;
       y: number;

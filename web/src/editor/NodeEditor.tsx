@@ -17,8 +17,9 @@ import {
 import '@xyflow/react/dist/style.css';
 import { useCallback, useEffect, useMemo, useState, type MouseEvent } from 'react';
 import { compilePatchToGlsl } from '../graph/glsl';
-import { acceptsInputLink, defaultParamsFor, getDefinition } from '../graph/nodeTypes';
-import type { NodeType } from '../graph/types';
+import { acceptsInputLink, defaultParamsFor, getDefinition, NODE_TYPE_LIST } from '../graph/nodeTypes';
+import { patchToJson } from '../graph/serialize';
+import type { NodeType, Patch } from '../graph/types';
 import { validatePatch } from '../graph/validate';
 import { ExportPanel } from '../export/ExportPanel';
 import { demoPatch } from '../graph/demoPatch';
@@ -55,6 +56,10 @@ function NodeEditorInner() {
   const [editingTypeNodeId, setEditingTypeNodeId] = useState<string | null>(null);
   const initialState = useMemo(() => loadInitialEditorState(), []);
   const [sidePanelOpen, setSidePanelOpen] = useState(initialState?.ui?.sidePanelOpen ?? true);
+  const [exportPanelView, setExportPanelView] = useState<'glsl' | 'json'>(
+    initialState?.ui?.exportPanelView === 'json' ? 'json' : 'glsl',
+  );
+  const [importError, setImportError] = useState<string | null>(null);
   const [uiHidden, setUiHidden] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [viewport, setViewport] = useState<Viewport>(initialState?.ui?.viewport ?? { x: 0, y: 0, zoom: 1 });
@@ -294,6 +299,7 @@ function NodeEditorInner() {
   );
 
   const patch = useMemo(() => patchFromFlow(nodesWithCallbacks, edgesWithCallbacks), [nodesWithCallbacks, edgesWithCallbacks]);
+  const patchJson = useMemo(() => patchToJson(patch), [patch]);
   const validation = useMemo(() => validatePatch(patch), [patch]);
   const compileResult = useMemo(() => compilePatchToGlsl(patch, 'webgl2'), [patch]);
   const feedbackEdgeIds = useMemo(() => new Set(compileResult.feedbackLinkIds), [compileResult.feedbackLinkIds]);
@@ -310,9 +316,10 @@ function NodeEditorInner() {
   useEffect(() => {
     saveEditorState(nodesWithCallbacks, edgesWithCallbacks, {
       sidePanelOpen,
+      exportPanelView,
       viewport,
     });
-  }, [edgesWithCallbacks, nodesWithCallbacks, sidePanelOpen, viewport]);
+  }, [edgesWithCallbacks, exportPanelView, nodesWithCallbacks, sidePanelOpen, viewport]);
 
   useEffect(() => {
     const updateFullscreenState = () => {
@@ -426,6 +433,38 @@ function NodeEditorInner() {
     void document.documentElement.requestFullscreen();
   }, []);
 
+  const loadPatchJson = useCallback((json: string) => {
+    let loadedPatch: Patch;
+
+    try {
+      loadedPatch = parsePatchJson(json);
+    } catch (error) {
+      setImportError(error instanceof Error ? error.message : String(error));
+      return;
+    }
+
+    const loadedValidation = validatePatch(loadedPatch);
+    if (!loadedValidation.ok) {
+      setImportError(loadedValidation.errors.join('\n'));
+      return;
+    }
+
+    setNodes(toFlowNodes(
+      loadedPatch,
+      updateNodeParam,
+      updateNodeType,
+      setEditingTypeNodeId,
+      () => setEditingTypeNodeId(null),
+      updateNodeId,
+      insertNodeOnPort,
+      null,
+    ));
+    setEdges(toFlowEdges(loadedPatch, updateEdgeWeight));
+    setEditingTypeNodeId(null);
+    setImportError(null);
+    setExportPanelView('json');
+  }, [insertNodeOnPort, updateEdgeWeight, updateNodeId, updateNodeParam, updateNodeType]);
+
   const shellClassName = [
     'app-shell',
     sidePanelOpen && !uiHidden ? '' : 'app-shell-panel-closed',
@@ -459,7 +498,7 @@ function NodeEditorInner() {
             className="viewport-button side-panel-toggle"
             type="button"
             onClick={() => setSidePanelOpen((open) => !open)}
-            aria-label={sidePanelOpen ? 'Hide GLSL panel' : 'Show GLSL panel'}
+            aria-label={sidePanelOpen ? 'Hide export panel' : 'Show export panel'}
             title={sidePanelOpen ? 'Hide panel' : 'Show panel'}
           >
             {sidePanelOpen ? '>' : '<'}
@@ -514,9 +553,14 @@ function NodeEditorInner() {
       </section>
       {sidePanelOpen && !uiHidden ? (
         <ExportPanel
+          patchJson={patchJson}
           shaderCode={compileResult.shaderCode}
           validation={validation}
           compileErrors={compileResult.errors}
+          activeView={exportPanelView}
+          onActiveViewChange={setExportPanelView}
+          onLoadJson={loadPatchJson}
+          importError={importError}
         />
       ) : null}
     </main>
@@ -763,4 +807,105 @@ function saveEditorState(
   } catch {
     // Local storage can be unavailable in private or restricted browsing contexts.
   }
+}
+
+function parsePatchJson(json: string): Patch {
+  const parsed = JSON.parse(json) as unknown;
+  if (!isRecord(parsed)) {
+    throw new Error('Patch JSON must be an object.');
+  }
+  if (!Array.isArray(parsed.nodes)) {
+    throw new Error('Patch JSON must contain a nodes array.');
+  }
+  if (!Array.isArray(parsed.links)) {
+    throw new Error('Patch JSON must contain a links array.');
+  }
+
+  return {
+    nodes: parsed.nodes.map((node, index) => parsePatchNode(node, index)),
+    links: parsed.links.map((link, index) => parsePatchLink(link, index)),
+  };
+}
+
+function parsePatchNode(value: unknown, index: number): Patch['nodes'][number] {
+  if (!isRecord(value)) {
+    throw new Error(`Node ${index} must be an object.`);
+  }
+  if (typeof value.id !== 'string' || value.id.trim() === '') {
+    throw new Error(`Node ${index} needs a string id.`);
+  }
+  if (!isNodeType(value.type)) {
+    throw new Error(`Node "${value.id}" has an unknown type.`);
+  }
+  if (!isNumberRecord(value.params)) {
+    throw new Error(`Node "${value.id}" needs numeric params.`);
+  }
+
+  const position = value.position === undefined ? undefined : parsePosition(value.position, value.id);
+  return {
+    id: value.id,
+    type: value.type,
+    params: value.params,
+    ...(position ? { position } : {}),
+  };
+}
+
+function parsePatchLink(value: unknown, index: number): Patch['links'][number] {
+  if (!isRecord(value)) {
+    throw new Error(`Link ${index} must be an object.`);
+  }
+
+  const from = parseEndpoint(value.from, `Link ${index} source`);
+  const to = parseEndpoint(value.to, `Link ${index} target`);
+  const weight = value.weight;
+  if (weight !== undefined && (typeof weight !== 'number' || !Number.isFinite(weight))) {
+    throw new Error(`Link ${index} weight must be numeric.`);
+  }
+
+  return {
+    from,
+    to,
+    ...(weight === undefined ? {} : { weight }),
+  };
+}
+
+function parseEndpoint(value: unknown, label: string): Patch['links'][number]['from'] {
+  if (!isRecord(value) || typeof value.node !== 'string' || typeof value.port !== 'string') {
+    throw new Error(`${label} must contain string node and port values.`);
+  }
+
+  return {
+    node: value.node,
+    port: value.port,
+  };
+}
+
+function parsePosition(value: unknown, nodeId: string): Patch['nodes'][number]['position'] {
+  if (
+    !isRecord(value) ||
+    typeof value.x !== 'number' ||
+    typeof value.y !== 'number' ||
+    !Number.isFinite(value.x) ||
+    !Number.isFinite(value.y)
+  ) {
+    throw new Error(`Node "${nodeId}" position must contain numeric x and y values.`);
+  }
+
+  return {
+    x: value.x,
+    y: value.y,
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isNumberRecord(value: unknown): value is Record<string, number> {
+  if (!isRecord(value)) return false;
+  return Object.values(value).every((entry) => typeof entry === 'number' && Number.isFinite(entry));
+}
+
+function isNodeType(value: unknown): value is NodeType {
+  return typeof value === 'string' && (NODE_TYPE_LIST as string[]).includes(value);
 }

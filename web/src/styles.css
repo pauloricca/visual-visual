@@ -565,6 +565,59 @@ select:hover {
   border-bottom: 1px solid #fff;
 }
 
+.panel-tabs,
+.panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 0;
+}
+
+.panel-tab,
+.panel-action {
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid #fff;
+  border-radius: 0;
+  background: transparent;
+  color: #fff;
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.panel-tab + .panel-tab,
+.panel-action + .panel-action {
+  margin-left: -1px;
+}
+
+.panel-tab-active {
+  background: rgba(255, 255, 255, 0.95);
+  color: #000;
+}
+
+.panel-actions {
+  gap: 8px;
+  padding: 12px;
+  border-bottom: 1px solid #fff;
+}
+
+.panel-action {
+  min-width: 0;
+}
+
+.panel-action:hover,
+.panel-tab:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.panel-tab-active:hover {
+  background: rgba(255, 255, 255, 0.95);
+}
+
+.panel-file-input {
+  display: none;
+}
+
 .status {
   margin: 0;
 }

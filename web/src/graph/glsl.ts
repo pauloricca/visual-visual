@@ -296,10 +296,16 @@ function emitOutput(node: PatchNode, port: string, context: CompileContext): str
       return binary(node, context, '/');
     case 'Mod':
       return `mod(${input(node, 'a', context)}, ${input(node, 'b', context)})`;
+    case 'Pow':
+      return `pow(${input(node, 'a', context)}, ${input(node, 'b', context)})`;
     case 'Sin':
       return call1('sin', node, context);
     case 'Cos':
       return call1('cos', node, context);
+    case 'Tan':
+      return call1('tan', node, context);
+    case 'Atan':
+      return call1('atan', node, context);
     case 'Abs':
       return call1('abs', node, context);
     case 'Floor':
@@ -318,6 +324,33 @@ function emitOutput(node: PatchNode, port: string, context: CompileContext): str
       return `max(${input(node, 'a', context)}, ${input(node, 'b', context)})`;
     case 'Clamp':
       return `clamp(${input(node, 'value', context)}, ${input(node, 'min', context)}, ${input(node, 'max', context)})`;
+    case 'Saw':
+      assertPort(node, port, 'value');
+      return `(${oscillatorPhase(node, context)} * 2.0 - 1.0)`;
+    case 'Ramp':
+      assertPort(node, port, 'value');
+      return oscillatorPhase(node, context);
+    case 'Pulse':
+      assertPort(node, port, 'value');
+      return `step(${oscillatorPhase(node, context)}, clamp(${input(node, 'width', context)}, 0.0, 1.0))`;
+    case 'Triangle':
+      assertPort(node, port, 'value');
+      return `(1.0 - abs(${oscillatorPhase(node, context)} * 2.0 - 1.0))`;
+    case 'Polar':
+      return emitPolar(node, port, context);
+    case 'HSV':
+      return emitHsv(node, port, context);
+    case 'Gate':
+      assertPort(node, port, 'value');
+      return `((${input(node, 'gate', context)} > ${input(node, 'threshold', context)}) ? ${input(node, 'value', context)} : 0.0)`;
+    case 'Rotate':
+      return emitRotate(node, port, context);
+    case 'Quantise':
+      assertPort(node, port, 'value');
+      return `floor(${input(node, 'value', context)} * max(${input(node, 'levels', context)}, 1.0)) / max(${input(node, 'levels', context)}, 1.0)`;
+    case 'Distance':
+      assertPort(node, port, 'value');
+      return `distance(vec2(${input(node, 'x1', context)}, ${input(node, 'y1', context)}), vec2(${input(node, 'x2', context)}, ${input(node, 'y2', context)}))`;
     case 'Noise':
       return `fbmNoise(vec2(${input(node, 'x', context)}, ${input(node, 'y', context)}) * max(${input(node, 'scale', context)}, 0.0001) + vec2(${input(node, 'seed', context)} * 17.0, ${input(node, 'seed', context)} * 31.0))`;
     case 'Camera':
@@ -334,6 +367,48 @@ function emitOutput(node: PatchNode, port: string, context: CompileContext): str
     }
     default:
       throw new Error(`Unsupported node type "${node.type}".`);
+  }
+}
+
+function oscillatorPhase(node: PatchNode, context: CompileContext): string {
+  return `fract(u_time * ${input(node, 'frequency', context)} + ${input(node, 'phase', context)})`;
+}
+
+function emitPolar(node: PatchNode, port: string, context: CompileContext): string {
+  const radius = input(node, 'radius', context);
+  const angle = input(node, 'angle', context);
+
+  switch (port) {
+    case 'x':
+      return `(${radius} * cos(${angle}))`;
+    case 'y':
+      return `(${radius} * sin(${angle}))`;
+    default:
+      throw new Error(`Polar.${port} is not supported.`);
+  }
+}
+
+function emitHsv(node: PatchNode, port: string, context: CompileContext): string {
+  const channel = { r: 'r', g: 'g', b: 'b' }[port];
+  if (!channel) {
+    throw new Error(`HSV.${port} is not supported.`);
+  }
+
+  return `hsvToRgb(vec3(${input(node, 'h', context)}, ${input(node, 's', context)}, ${input(node, 'v', context)})).${channel}`;
+}
+
+function emitRotate(node: PatchNode, port: string, context: CompileContext): string {
+  const x = input(node, 'x', context);
+  const y = input(node, 'y', context);
+  const angle = input(node, 'angle', context);
+
+  switch (port) {
+    case 'x':
+      return `((${x} * cos(${angle})) - (${y} * sin(${angle})))`;
+    case 'y':
+      return `((${x} * sin(${angle})) + (${y} * cos(${angle})))`;
+    default:
+      throw new Error(`Rotate.${port} is not supported.`);
   }
 }
 
@@ -503,6 +578,12 @@ ${feedbackUniforms}
 ${delayUniforms}
 ${envelopeUniforms}
 ${mediaUniforms}
+
+vec3 hsvToRgb(vec3 hsv) {
+  vec3 rgb = clamp(abs(mod(hsv.x * 6.0 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0);
+  rgb = rgb * rgb * (3.0 - 2.0 * rgb);
+  return hsv.z * mix(vec3(1.0), rgb, clamp(hsv.y, 0.0, 1.0));
+}
 
 vec2 noiseGradient(vec2 p) {
   float angle = 6.28318530718 * fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
