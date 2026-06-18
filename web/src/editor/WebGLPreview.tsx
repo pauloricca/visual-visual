@@ -125,7 +125,7 @@ export function WebGLPreview({
     glRef.current = gl;
     vaoRef.current = gl.createVertexArray();
     gl.bindVertexArray(vaoRef.current);
-    const blitProgram = createProgram(gl, BLIT_FRAGMENT_SHADER);
+    const blitProgram = createProgram(gl, BLIT_FRAGMENT_SHADER, BLIT_VERTEX_SHADER);
     blitProgramRef.current = {
       program: blitProgram,
       uTexture: gl.getUniformLocation(blitProgram, 'u_texture'),
@@ -869,8 +869,12 @@ function resizeCanvasToDisplaySize(canvas: HTMLCanvasElement, gl: WebGL2Renderin
   gl.viewport(0, 0, canvas.width, canvas.height);
 }
 
-function createProgram(gl: WebGL2RenderingContext, fragmentSource: string): WebGLProgram {
-  const vertexShader = createShader(gl, gl.VERTEX_SHADER, VERTEX_SHADER);
+function createProgram(
+  gl: WebGL2RenderingContext,
+  fragmentSource: string,
+  vertexSource = VERTEX_SHADER,
+): WebGLProgram {
+  const vertexShader = createShader(gl, gl.VERTEX_SHADER, vertexSource);
   const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fragmentSource);
   const program = gl.createProgram();
   if (!program) {
@@ -924,14 +928,32 @@ void main() {
 }
 `;
 
+const BLIT_VERTEX_SHADER = `#version 300 es
+precision highp float;
+
+const vec2 POSITIONS[3] = vec2[3](
+  vec2(-1.0, -1.0),
+  vec2(3.0, -1.0),
+  vec2(-1.0, 3.0)
+);
+
+out vec2 v_uv;
+
+void main() {
+  vec2 position = POSITIONS[gl_VertexID];
+  gl_Position = vec4(position, 0.0, 1.0);
+  v_uv = position * 0.5 + 0.5;
+}
+`;
+
 const BLIT_FRAGMENT_SHADER = `#version 300 es
 precision highp float;
 
 uniform sampler2D u_texture;
+in vec2 v_uv;
 out vec4 fragColor;
 
 void main() {
-  vec2 uv = gl_FragCoord.xy / vec2(textureSize(u_texture, 0));
-  fragColor = texture(u_texture, uv);
+  fragColor = texture(u_texture, clamp(v_uv, 0.0, 1.0));
 }
 `;

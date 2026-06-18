@@ -15,7 +15,7 @@ import {
   Viewport,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type MutableRefObject } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type MouseEvent, type MutableRefObject } from 'react';
 import { compilePatchToGlsl } from '../graph/glsl';
 import { acceptsInputLink, defaultParamsFor, getDefinition, NODE_TYPE_LIST } from '../graph/nodeTypes';
 import { patchToJson } from '../graph/serialize';
@@ -59,9 +59,6 @@ function NodeEditorInner() {
   const [editingTypeNodeId, setEditingTypeNodeId] = useState<string | null>(null);
   const initialState = useMemo(() => loadInitialEditorState(), []);
   const [sidePanelOpen, setSidePanelOpen] = useState(initialState?.ui?.sidePanelOpen ?? true);
-  const [exportPanelView, setExportPanelView] = useState<'glsl' | 'json'>(
-    initialState?.ui?.exportPanelView === 'json' ? 'json' : 'glsl',
-  );
   const [importError, setImportError] = useState<string | null>(null);
   const [uiHidden, setUiHidden] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -102,6 +99,7 @@ function NodeEditorInner() {
     past: [],
     future: [],
   });
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     nodesRef.current = nodes;
@@ -379,10 +377,9 @@ function NodeEditorInner() {
   useEffect(() => {
     saveEditorState(nodesWithCallbacks, edgesWithCallbacks, {
       sidePanelOpen,
-      exportPanelView,
       viewport,
     });
-  }, [edgesWithCallbacks, exportPanelView, nodesWithCallbacks, sidePanelOpen, viewport]);
+  }, [edgesWithCallbacks, nodesWithCallbacks, sidePanelOpen, viewport]);
 
   useEffect(() => {
     const updateFullscreenState = () => {
@@ -551,8 +548,31 @@ function NodeEditorInner() {
     setEdges(toFlowEdges(loadedPatch, updateEdgeWeight, insertNodeOnEdge));
     setEditingTypeNodeId(null);
     setImportError(null);
-    setExportPanelView('json');
   }, [commitHistory, insertNodeOnEdge, insertNodeOnPort, updateEdgeWeight, updateNodeId, updateNodeParam, updateNodeType]);
+
+  const savePatchJson = useCallback(() => {
+    const blob = new Blob([patchJson], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'visual-visual-patch.json';
+    document.body.append(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }, [patchJson]);
+
+  const loadPatchFile = useCallback(async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = '';
+    if (!file) return;
+
+    try {
+      loadPatchJson(await file.text());
+    } catch (error) {
+      setImportError(error instanceof Error ? error.message : String(error));
+    }
+  }, [loadPatchJson]);
 
   const restoreSnapshot = useCallback((snapshot: GraphSnapshot) => {
     const state: PersistedEditorState = {
@@ -669,10 +689,28 @@ function NodeEditorInner() {
             className="viewport-button side-panel-toggle"
             type="button"
             onClick={() => setSidePanelOpen((open) => !open)}
-            aria-label={sidePanelOpen ? 'Hide export panel' : 'Show export panel'}
-            title={sidePanelOpen ? 'Hide panel' : 'Show panel'}
+            aria-label={sidePanelOpen ? 'Hide GLSL panel' : 'Show GLSL panel'}
+            title={sidePanelOpen ? 'Hide GLSL panel' : 'Show GLSL panel'}
           >
-            {sidePanelOpen ? '>' : '<'}
+            GL
+          </button>
+          <button
+            className="viewport-button"
+            type="button"
+            onClick={savePatchJson}
+            aria-label="Save patch JSON"
+            title="Save patch JSON"
+          >
+            SV
+          </button>
+          <button
+            className="viewport-button"
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            aria-label="Load patch JSON"
+            title="Load patch JSON"
+          >
+            LD
           </button>
           <button
             className="viewport-button viewport-button-history"
@@ -712,8 +750,15 @@ function NodeEditorInner() {
           >
             UI
           </button>
+          <input
+            ref={fileInputRef}
+            className="panel-file-input"
+            type="file"
+            accept="application/json,.json"
+            onChange={loadPatchFile}
+          />
         </div>
-        <div className="fps-counter">{fps} fps</div>
+        <div className="fps-counter">{fps} FPS</div>
         <ReactFlow
           nodes={nodesWithCallbacks}
           edges={displayEdges}
@@ -749,13 +794,9 @@ function NodeEditorInner() {
       </section>
       {sidePanelOpen && !uiHidden ? (
         <ExportPanel
-          patchJson={patchJson}
           shaderCode={compileResult.shaderCode}
           validation={validation}
           compileErrors={compileResult.errors}
-          activeView={exportPanelView}
-          onActiveViewChange={setExportPanelView}
-          onLoadJson={loadPatchJson}
           importError={importError}
         />
       ) : null}
