@@ -17,7 +17,13 @@ The script runs Docker Compose and opens `http://localhost:5173/`.
 - Drag between ports to connect float outputs to float inputs.
 - Multiple links can feed one input; their values are averaged.
 - Drag numeric boxes up/down to change values, or click and type decimals.
-- Use the right panel to copy/import JSON or inspect GLSL.
+- Use `GL` to show/hide the GLSL side panel.
+- Use `SV` to save the current patch JSON.
+- Use `LD` to load a patch JSON file.
+- Use `UN` to undo and `RE` to redo graph edits.
+- Use `FS` to enter/exit fullscreen mode.
+- Use `UI` to hide editor overlays (click or press a key to restore).
+- The framerate overlay is shown as `120 FPS`.
 
 ## Local Development Without Docker
 
