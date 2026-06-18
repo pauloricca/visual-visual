@@ -7,9 +7,9 @@
   --control-bg: rgba(0, 0, 0, 0.62);
   --menu-bg: rgba(0, 0, 0, 0.9);
   --viewport-inset: 14px;
-  --viewport-gap: 12px;
   --control-size: 28px;
-  --flow-controls-width: 56px;
+  --viewport-gap: var(--viewport-inset);
+  --flow-controls-width: var(--control-size);
 }
 
 * {
@@ -104,6 +104,23 @@ select:hover {
   padding: 0 8px;
 }
 
+.viewport-button-history {
+  width: auto;
+  min-width: var(--control-size);
+  padding: 0 7px;
+}
+
+.viewport-button:disabled {
+  color: rgba(255, 255, 255, 0.34);
+  cursor: default;
+}
+
+.viewport-button:disabled:hover,
+.viewport-button:disabled:focus {
+  background: var(--surface-bg);
+  color: rgba(255, 255, 255, 0.34);
+}
+
 .viewport-button:hover,
 .viewport-button:focus {
   background: #fff;
@@ -174,6 +191,7 @@ select:hover {
 .react-flow__controls {
   left: var(--viewport-inset) !important;
   bottom: var(--viewport-inset) !important;
+  margin: 0 !important;
   z-index: 30;
   display: flex;
   visibility: visible;
@@ -184,6 +202,10 @@ select:hover {
   right: var(--viewport-inset) !important;
   bottom: var(--viewport-inset) !important;
   margin: 0 !important;
+}
+
+.react-flow__attribution {
+  display: none;
 }
 
 .react-flow__controls-button {
@@ -206,19 +228,19 @@ select:hover {
   fill: #fff;
 }
 
+.app-shell-ui-hidden,
+.app-shell-ui-hidden * {
+  cursor: none !important;
+}
+
 .app-shell-ui-hidden .react-flow__nodes,
 .app-shell-ui-hidden .react-flow__edges,
 .app-shell-ui-hidden .react-flow__edgelabel-renderer,
 .app-shell-ui-hidden .react-flow__controls,
 .app-shell-ui-hidden .react-flow__minimap,
 .app-shell-ui-hidden .fps-counter,
-.app-shell-ui-hidden .side-panel-toggle,
-.app-shell-ui-hidden .viewport-buttons .viewport-button:not(.viewport-button-ui) {
-  display: none;
-}
-
 .app-shell-ui-hidden .viewport-buttons {
-  z-index: 40;
+  display: none;
 }
 
 .app-shell-ui-hidden .editor-shell {

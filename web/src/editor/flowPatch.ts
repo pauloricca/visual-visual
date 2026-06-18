@@ -21,6 +21,7 @@ export type ShaderFlowNode = Node<ShaderNodeData, 'shaderNode'>;
 export interface ShaderEdgeData extends Record<string, unknown> {
   weight: number;
   onWeightChange: (edgeId: string, weight: number) => void;
+  onInsertNode: (edgeId: string) => void;
 }
 
 export type ShaderFlowEdge = Edge<ShaderEdgeData, 'shaderEdge'>;
@@ -82,6 +83,7 @@ export function toFlowNodes(
 export function toFlowEdges(
   patch: Patch,
   onWeightChange: ShaderEdgeData['onWeightChange'],
+  onInsertNode: ShaderEdgeData['onInsertNode'] = noopInsertNode,
 ): ShaderFlowEdge[] {
   return patch.links.map((link) => ({
     id: edgeId(link),
@@ -93,6 +95,7 @@ export function toFlowEdges(
     data: {
       weight: link.weight ?? 1,
       onWeightChange,
+      onInsertNode,
     },
     className: 'shader-edge',
   }));
@@ -133,6 +136,7 @@ export function editorStateToFlowNodes(
 export function editorStateToFlowEdges(
   state: PersistedEditorState,
   onWeightChange: ShaderEdgeData['onWeightChange'],
+  onInsertNode: ShaderEdgeData['onInsertNode'] = noopInsertNode,
 ): ShaderFlowEdge[] {
   return state.edges.map((edge) => ({
     ...edge,
@@ -140,9 +144,14 @@ export function editorStateToFlowEdges(
     data: {
       weight: edge.weight ?? 1,
       onWeightChange,
+      onInsertNode,
     },
     className: 'shader-edge',
   }));
+}
+
+function noopInsertNode() {
+  // Replaced after React state exists.
 }
 
 export function flowToEditorState(

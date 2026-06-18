@@ -15,7 +15,7 @@ import {
   Viewport,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { useCallback, useEffect, useMemo, useState, type MouseEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type MutableRefObject } from 'react';
 import { compilePatchToGlsl } from '../graph/glsl';
 import { acceptsInputLink, defaultParamsFor, getDefinition, NODE_TYPE_LIST } from '../graph/nodeTypes';
 import { patchToJson } from '../graph/serialize';
@@ -43,6 +43,9 @@ import { WebGLPreview } from './WebGLPreview';
 const nodeTypes = { shaderNode: ShaderNode };
 const edgeTypes = { shaderEdge: ShaderEdge };
 const STORAGE_KEY = 'visual-visual.editor-state.v1';
+const HISTORY_LIMIT = 100;
+
+type GraphSnapshot = Pick<PersistedEditorState, 'nodes' | 'edges'>;
 
 export function NodeEditor() {
   return (
@@ -91,8 +94,50 @@ function NodeEditorInner() {
   const [edges, setEdges] = useState<ShaderFlowEdge[]>(() =>
     initialState ? editorStateToFlowEdges(initialState, updateEdgeWeightPlaceholder) : toFlowEdges(demoPatch, updateEdgeWeightPlaceholder),
   );
+  const nodesRef = useRef(nodes);
+  const edgesRef = useRef(edges);
+  const historyGroupRef = useRef<{ key: string; time: number } | null>(null);
+  const nodeDragHistoryRef = useRef(false);
+  const [history, setHistory] = useState<{ past: GraphSnapshot[]; future: GraphSnapshot[] }>({
+    past: [],
+    future: [],
+  });
+
+  useEffect(() => {
+    nodesRef.current = nodes;
+  }, [nodes]);
+
+  useEffect(() => {
+    edgesRef.current = edges;
+  }, [edges]);
+
+  const commitHistory = useCallback((groupKey?: string) => {
+    const now = Date.now();
+    const lastGroup = historyGroupRef.current;
+    if (groupKey && lastGroup?.key === groupKey && now - lastGroup.time < 800) {
+      historyGroupRef.current = { key: groupKey, time: now };
+      return;
+    }
+
+    const snapshot = graphSnapshot(nodesRef.current, edgesRef.current);
+    const snapshotKey = graphSnapshotKey(snapshot);
+
+    setHistory((current) => {
+      const lastSnapshot = current.past[current.past.length - 1];
+      if (lastSnapshot && graphSnapshotKey(lastSnapshot) === snapshotKey) {
+        return current;
+      }
+
+      return {
+        past: [...current.past, snapshot].slice(-HISTORY_LIMIT),
+        future: [],
+      };
+    });
+    historyGroupRef.current = groupKey ? { key: groupKey, time: now } : null;
+  }, []);
 
   const updateNodeParam = useCallback((nodeId: string, port: string, value: number) => {
+    commitHistory(`param:${nodeId}:${port}`);
     setNodes((current) =>
       current.map((node) =>
         node.id === nodeId
@@ -109,9 +154,10 @@ function NodeEditorInner() {
           : node,
       ),
     );
-  }, []);
+  }, [commitHistory]);
 
   const updateEdgeWeight = useCallback((edgeIdToUpdate: string, weight: number) => {
+    commitHistory(`weight:${edgeIdToUpdate}`);
     setEdges((current) =>
       current.map((edge) =>
         edge.id === edgeIdToUpdate
@@ -121,17 +167,19 @@ function NodeEditorInner() {
                 ...edge.data,
                 weight,
                 onWeightChange: edge.data?.onWeightChange ?? updateEdgeWeightPlaceholder,
+                onInsertNode: edge.data?.onInsertNode ?? updateEdgeInsertPlaceholder,
               },
             }
           : edge,
       ),
     );
-  }, []);
+  }, [commitHistory]);
 
   const updateNodeId = useCallback((nodeId: string, requestedId: string) => {
     const nextId = uniqueNodeId(requestedId, nodeId, nodes);
     if (!nextId || nextId === nodeId) return;
 
+    commitHistory();
     setNodes((current) =>
       current.map((node) =>
         node.id === nodeId
@@ -151,7 +199,7 @@ function NodeEditorInner() {
     );
     setEdges((current) => dedupeEdges(current.map((edge) => renameEdgeNode(edge, nodeId, nextId))));
     setEditingTypeNodeId((current) => current === nodeId ? nextId : current);
-  }, [nodes]);
+  }, [commitHistory, nodes]);
 
   const updateNodeType = useCallback((nodeId: string, type: NodeType) => {
     const relatedNode = nodes.find((node) => node.id === nodeId);
@@ -162,6 +210,7 @@ function NodeEditorInner() {
       ? nextTypeNodeId(nodeId, type, nodes)
       : nodeId;
 
+    commitHistory();
     setNodes((current) =>
       current.map((node) => {
         if (node.id !== nodeId) return node;
@@ -200,23 +249,15 @@ function NodeEditorInner() {
       })),
     );
     setEditingTypeNodeId((current) => current === nodeId ? nextId : current);
-  }, [nodes]);
+  }, [commitHistory, nodes]);
 
-  const insertNodeOnPort = useCallback((nodeId: string, side: 'input' | 'output', port: string) => {
-    const relatedEdges = edges
-      .map((edge) => ({ edge, link: linkFromEdge(edge) }))
-      .filter(({ link }) => {
-        if (!link) return false;
-        return side === 'output'
-          ? link.from.node === nodeId && link.from.port === port
-          : link.to.node === nodeId && link.to.port === port;
-      });
-
+  const insertNodeOnEdges = useCallback((relatedEdges: ShaderFlowEdge[]) => {
     if (relatedEdges.length === 0) return;
 
+    commitHistory();
     const existingIds = new Set(nodes.map((node) => node.id));
     const id = makeNodeId('node', existingIds);
-    const firstLink = relatedEdges[0].link;
+    const firstLink = linkFromEdge(relatedEdges[0]);
     const sourceNode = firstLink ? nodes.find((node) => node.id === firstLink.from.node) : null;
     const targetNode = firstLink ? nodes.find((node) => node.id === firstLink.to.node) : null;
     const position = midpointPosition(sourceNode?.position, targetNode?.position);
@@ -242,7 +283,7 @@ function NodeEditorInner() {
       },
     };
 
-    const relatedEdgeIds = new Set(relatedEdges.map(({ edge }) => edge.id));
+    const relatedEdgeIds = new Set(relatedEdges.map((edge) => edge.id));
     const rewiredEdges = edges.flatMap((edge) => {
       if (!relatedEdgeIds.has(edge.id)) return [edge];
 
@@ -265,7 +306,26 @@ function NodeEditorInner() {
     setNodes((current) => [...current, insertedNode]);
     setEdges(dedupeEdges(rewiredEdges));
     setEditingTypeNodeId(id);
-  }, [edges, nodes, updateNodeParam, updateNodeType]);
+  }, [commitHistory, edges, nodes, updateNodeId, updateNodeParam, updateNodeType]);
+
+  const insertNodeOnPort = useCallback((nodeId: string, side: 'input' | 'output', port: string) => {
+    const relatedEdges = edges
+      .map((edge) => ({ edge, link: linkFromEdge(edge) }))
+      .filter(({ link }) => {
+        if (!link) return false;
+        return side === 'output'
+          ? link.from.node === nodeId && link.from.port === port
+          : link.to.node === nodeId && link.to.port === port;
+      });
+
+    insertNodeOnEdges(relatedEdges.map(({ edge }) => edge));
+  }, [edges, insertNodeOnEdges]);
+
+  const insertNodeOnEdge = useCallback((edgeIdToInsert: string) => {
+    const edge = edges.find((candidate) => candidate.id === edgeIdToInsert);
+    if (!edge) return;
+    insertNodeOnEdges([edge]);
+  }, [edges, insertNodeOnEdges]);
 
   const nodesWithCallbacks = useMemo(
     () =>
@@ -293,9 +353,10 @@ function NodeEditorInner() {
           ...edge.data,
           weight: edge.data?.weight ?? 1,
           onWeightChange: updateEdgeWeight,
+          onInsertNode: insertNodeOnEdge,
         },
       })),
-    [edges, updateEdgeWeight],
+    [edges, insertNodeOnEdge, updateEdgeWeight],
   );
 
   const patch = useMemo(() => patchFromFlow(nodesWithCallbacks, edgesWithCallbacks), [nodesWithCallbacks, edgesWithCallbacks]);
@@ -334,13 +395,34 @@ function NodeEditorInner() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!uiHidden) return;
+
+    const showUi = (event: KeyboardEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      setUiHidden(false);
+    };
+
+    window.addEventListener('keydown', showUi, { capture: true });
+    return () => {
+      window.removeEventListener('keydown', showUi, { capture: true });
+    };
+  }, [uiHidden]);
+
   const onNodesChange = useCallback((changes: NodeChange<ShaderFlowNode>[]) => {
+    if (shouldRecordNodeChanges(changes, nodeDragHistoryRef)) {
+      commitHistory('node-change');
+    }
     setNodes((current) => applyNodeChanges(changes, current));
-  }, []);
+  }, [commitHistory]);
 
   const onEdgesChange = useCallback((changes: EdgeChange<ShaderFlowEdge>[]) => {
+    if (shouldRecordEdgeChanges(changes)) {
+      commitHistory();
+    }
     setEdges((current) => applyEdgeChanges(changes, current));
-  }, []);
+  }, [commitHistory]);
 
   const onConnect = useCallback((connection: Connection) => {
     const candidate: ShaderFlowEdge = {
@@ -353,25 +435,27 @@ function NodeEditorInner() {
       data: {
         weight: 1,
         onWeightChange: updateEdgeWeight,
+        onInsertNode: insertNodeOnEdge,
       },
       className: 'shader-edge',
     };
     const link = linkFromEdge(candidate);
     if (!link) return;
 
-    setEdges((current) => {
-      const alreadyConnected = current.some((edge) => {
-        const existing = linkFromEdge(edge);
-        return (
-          existing &&
-          existing.from.node === link.from.node &&
-          existing.from.port === link.from.port &&
-          existing.to.node === link.to.node &&
-          existing.to.port === link.to.port
-        );
-      });
-      if (alreadyConnected) return current;
+    const alreadyConnected = edges.some((edge) => {
+      const existing = linkFromEdge(edge);
+      return (
+        existing &&
+        existing.from.node === link.from.node &&
+        existing.from.port === link.from.port &&
+        existing.to.node === link.to.node &&
+        existing.to.port === link.to.port
+      );
+    });
+    if (alreadyConnected) return;
 
+    commitHistory();
+    setEdges((current) => {
       return addEdge(
         {
           ...candidate,
@@ -383,16 +467,18 @@ function NodeEditorInner() {
           data: {
             weight: 1,
             onWeightChange: updateEdgeWeight,
+            onInsertNode: insertNodeOnEdge,
           },
         },
         current,
       );
     });
-  }, [updateEdgeWeight]);
+  }, [commitHistory, edges, insertNodeOnEdge, updateEdgeWeight]);
 
   const addNodeAt = useCallback(
     (event: MouseEvent) => {
       if (!reactFlow) return;
+      commitHistory();
       const existing = new Set(nodes.map((node) => node.id));
       const id = makeNodeId('node', existing);
       const position = reactFlow.screenToFlowPosition({ x: event.clientX, y: event.clientY });
@@ -421,7 +507,7 @@ function NodeEditorInner() {
       ]);
       setEditingTypeNodeId(id);
     },
-    [insertNodeOnPort, nodes, reactFlow, updateNodeId, updateNodeParam, updateNodeType],
+    [commitHistory, insertNodeOnPort, nodes, reactFlow, updateNodeId, updateNodeParam, updateNodeType],
   );
 
   const toggleFullscreen = useCallback(() => {
@@ -449,6 +535,7 @@ function NodeEditorInner() {
       return;
     }
 
+    commitHistory();
     setNodes(toFlowNodes(
       loadedPatch,
       updateNodeParam,
@@ -459,11 +546,84 @@ function NodeEditorInner() {
       insertNodeOnPort,
       null,
     ));
-    setEdges(toFlowEdges(loadedPatch, updateEdgeWeight));
+    setEdges(toFlowEdges(loadedPatch, updateEdgeWeight, insertNodeOnEdge));
     setEditingTypeNodeId(null);
     setImportError(null);
     setExportPanelView('json');
-  }, [insertNodeOnPort, updateEdgeWeight, updateNodeId, updateNodeParam, updateNodeType]);
+  }, [commitHistory, insertNodeOnEdge, insertNodeOnPort, updateEdgeWeight, updateNodeId, updateNodeParam, updateNodeType]);
+
+  const restoreSnapshot = useCallback((snapshot: GraphSnapshot) => {
+    const state: PersistedEditorState = {
+      version: 1,
+      nodes: snapshot.nodes,
+      edges: snapshot.edges,
+    };
+
+    setNodes(editorStateToFlowNodes(
+      state,
+      updateNodeParam,
+      updateNodeType,
+      setEditingTypeNodeId,
+      () => setEditingTypeNodeId(null),
+      updateNodeId,
+      insertNodeOnPort,
+      null,
+    ));
+    setEdges(editorStateToFlowEdges(state, updateEdgeWeight, insertNodeOnEdge));
+    setEditingTypeNodeId(null);
+  }, [insertNodeOnEdge, insertNodeOnPort, updateEdgeWeight, updateNodeId, updateNodeParam, updateNodeType]);
+
+  const undo = useCallback(() => {
+    const previous = history.past[history.past.length - 1];
+    if (!previous) return;
+
+    const currentSnapshot = graphSnapshot(nodesRef.current, edgesRef.current);
+    restoreSnapshot(previous);
+    historyGroupRef.current = null;
+    nodeDragHistoryRef.current = false;
+    setHistory({
+      past: history.past.slice(0, -1),
+      future: [currentSnapshot, ...history.future].slice(0, HISTORY_LIMIT),
+    });
+  }, [history, restoreSnapshot]);
+
+  const redo = useCallback(() => {
+    const next = history.future[0];
+    if (!next) return;
+
+    const currentSnapshot = graphSnapshot(nodesRef.current, edgesRef.current);
+    restoreSnapshot(next);
+    historyGroupRef.current = null;
+    nodeDragHistoryRef.current = false;
+    setHistory({
+      past: [...history.past, currentSnapshot].slice(-HISTORY_LIMIT),
+      future: history.future.slice(1),
+    });
+  }, [history, restoreSnapshot]);
+
+  useEffect(() => {
+    const handleHistoryKeyDown = (event: KeyboardEvent) => {
+      if (isEditableEventTarget(event.target)) return;
+      const hasModifier = event.metaKey || event.ctrlKey;
+      if (!hasModifier) return;
+
+      const key = event.key.toLowerCase();
+      if (key === 'z' && !event.shiftKey) {
+        event.preventDefault();
+        undo();
+        return;
+      }
+      if ((key === 'z' && event.shiftKey) || key === 'y') {
+        event.preventDefault();
+        redo();
+      }
+    };
+
+    window.addEventListener('keydown', handleHistoryKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleHistoryKeyDown);
+    };
+  }, [redo, undo]);
 
   const shellClassName = [
     'app-shell',
@@ -472,7 +632,15 @@ function NodeEditorInner() {
   ].filter(Boolean).join(' ');
 
   return (
-    <main className={shellClassName}>
+    <main
+      className={shellClassName}
+      onPointerDownCapture={(event) => {
+        if (!uiHidden) return;
+        event.preventDefault();
+        event.stopPropagation();
+        setUiHidden(false);
+      }}
+    >
       <WebGLPreview
         fragmentShader={compileResult.shaderCode}
         feedbackTextureCount={compileResult.feedbackTextureCount}
@@ -504,6 +672,26 @@ function NodeEditorInner() {
             {sidePanelOpen ? '>' : '<'}
           </button>
           <button
+            className="viewport-button viewport-button-history"
+            type="button"
+            onClick={undo}
+            disabled={history.past.length === 0}
+            aria-label="Undo"
+            title="Undo"
+          >
+            UN
+          </button>
+          <button
+            className="viewport-button viewport-button-history"
+            type="button"
+            onClick={redo}
+            disabled={history.future.length === 0}
+            aria-label="Redo"
+            title="Redo"
+          >
+            RE
+          </button>
+          <button
             className="viewport-button"
             type="button"
             onClick={toggleFullscreen}
@@ -515,11 +703,11 @@ function NodeEditorInner() {
           <button
             className="viewport-button viewport-button-ui"
             type="button"
-            onClick={() => setUiHidden((hidden) => !hidden)}
-            aria-label={uiHidden ? 'Show UI' : 'Hide UI'}
-            title={uiHidden ? 'Show UI' : 'Hide UI'}
+            onClick={() => setUiHidden(true)}
+            aria-label="Hide UI"
+            title="Hide UI"
           >
-            {uiHidden ? 'SHOW' : 'UI'}
+            UI
           </button>
         </div>
         <div className="fps-counter">{fps} fps</div>
@@ -531,6 +719,11 @@ function NodeEditorInner() {
           onInit={setReactFlow}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
+          onEdgeDoubleClick={(event, edge) => {
+            event.preventDefault();
+            event.stopPropagation();
+            insertNodeOnEdge(edge.id);
+          }}
           onConnect={onConnect}
           onMoveEnd={(_, nextViewport) => setViewport(nextViewport)}
           connectionMode={ConnectionMode.Loose}
@@ -591,6 +784,10 @@ function updateEdgeWeightPlaceholder() {
   // Replaced after React state exists.
 }
 
+function updateEdgeInsertPlaceholder() {
+  // Replaced after React state exists.
+}
+
 function portDoubleClickPlaceholder() {
   // Replaced after React state exists.
 }
@@ -606,9 +803,69 @@ function edgeFromLink(link: NonNullable<ReturnType<typeof linkFromEdge>>): Shade
     data: {
       weight: link.weight ?? 1,
       onWeightChange: updateEdgeWeightPlaceholder,
+      onInsertNode: updateEdgeInsertPlaceholder,
     },
     className: 'shader-edge',
   };
+}
+
+function graphSnapshot(nodes: ShaderFlowNode[], edges: ShaderFlowEdge[]): GraphSnapshot {
+  const state = flowToEditorState(nodes, edges);
+  return {
+    nodes: state.nodes,
+    edges: state.edges,
+  };
+}
+
+function graphSnapshotKey(snapshot: GraphSnapshot): string {
+  return JSON.stringify(snapshot);
+}
+
+function shouldRecordNodeChanges(
+  changes: NodeChange<ShaderFlowNode>[],
+  dragHistoryRef: MutableRefObject<boolean>,
+): boolean {
+  let shouldRecord = false;
+
+  for (const change of changes) {
+    if (change.type === 'select' || change.type === 'dimensions') {
+      continue;
+    }
+
+    if (change.type === 'position') {
+      if (change.dragging) {
+        if (!dragHistoryRef.current) {
+          dragHistoryRef.current = true;
+          shouldRecord = true;
+        }
+        continue;
+      }
+
+      if (dragHistoryRef.current) {
+        dragHistoryRef.current = false;
+        continue;
+      }
+    }
+
+    shouldRecord = true;
+  }
+
+  return shouldRecord;
+}
+
+function shouldRecordEdgeChanges(changes: EdgeChange<ShaderFlowEdge>[]): boolean {
+  return changes.some((change) => change.type !== 'select');
+}
+
+function isEditableEventTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  const tagName = target.tagName.toLowerCase();
+  return (
+    tagName === 'input' ||
+    tagName === 'textarea' ||
+    tagName === 'select' ||
+    target.isContentEditable
+  );
 }
 
 function renameEdgeNode(edge: ShaderFlowEdge, previousNodeId: string, nextNodeId: string): ShaderFlowEdge {
