@@ -100,6 +100,7 @@ function NodeEditorInner() {
     future: [],
   });
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const editorShellRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     nodesRef.current = nodes;
@@ -409,6 +410,43 @@ function NodeEditorInner() {
     };
   }, [uiHidden]);
 
+  useEffect(() => {
+    const editorShell = editorShellRef.current;
+    if (!editorShell) return;
+
+    let rafId = 0;
+    const scheduleMaskUpdate = () => {
+      cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(() => {
+        updateScopeEdgeMask(editorShell);
+      });
+    };
+
+    const mutationObserver = new MutationObserver(() => {
+      scheduleMaskUpdate();
+    });
+    mutationObserver.observe(editorShell, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: ['style', 'class'],
+    });
+
+    const resizeObserver = new ResizeObserver(() => {
+      scheduleMaskUpdate();
+    });
+    resizeObserver.observe(editorShell);
+
+    scheduleMaskUpdate();
+
+    return () => {
+      mutationObserver.disconnect();
+      resizeObserver.disconnect();
+      cancelAnimationFrame(rafId);
+      clearScopeEdgeMask(editorShell);
+    };
+  }, []);
+
   const onNodesChange = useCallback((changes: NodeChange<ShaderFlowNode>[]) => {
     if (shouldRecordNodeChanges(changes, nodeDragHistoryRef)) {
       commitHistory('node-change');
@@ -674,6 +712,7 @@ function NodeEditorInner() {
         onFpsChange={setFps}
       />
       <section
+        ref={editorShellRef}
         className="editor-shell"
         onDoubleClick={(event) => {
           const target = event.target as HTMLElement;
@@ -802,6 +841,88 @@ function NodeEditorInner() {
       ) : null}
     </main>
   );
+}
+
+function updateScopeEdgeMask(editorShell: HTMLElement): void {
+  const rendererLayer = editorShell.querySelector<HTMLElement>('.react-flow__renderer');
+  if (!rendererLayer) return;
+
+  const scopeElements = Array.from(editorShell.querySelectorAll<HTMLElement>('.scope-preview'));
+  if (scopeElements.length === 0) {
+    clearScopeEdgeMask(editorShell);
+    return;
+  }
+
+  const layerRect = rendererLayer.getBoundingClientRect();
+  if (layerRect.width <= 0 || layerRect.height <= 0) {
+    clearScopeEdgeMask(editorShell);
+    return;
+  }
+
+  const maskPadding = 2;
+  const borderReveal = 2;
+
+  const maskRects = scopeElements.flatMap((element) => {
+    const rect = element.getBoundingClientRect();
+    const left = Math.max(rect.left, layerRect.left);
+    const top = Math.max(rect.top, layerRect.top);
+    const right = Math.min(rect.right, layerRect.right);
+    const bottom = Math.min(rect.bottom, layerRect.bottom);
+    if (right <= left || bottom <= top) return [];
+
+    return [{
+      x: left - layerRect.left - maskPadding,
+      y: top - layerRect.top - maskPadding,
+      width: (right - left) + maskPadding * 2,
+      height: (bottom - top) + maskPadding * 2,
+    }];
+  });
+
+  if (maskRects.length === 0) {
+    clearScopeEdgeMask(editorShell);
+    return;
+  }
+
+  const width = Math.max(1, Math.round(layerRect.width));
+  const height = Math.max(1, Math.round(layerRect.height));
+  const holeRects = maskRects.map((rect) => {
+    const x = Math.round(rect.x + borderReveal);
+    const y = Math.round(rect.y + borderReveal);
+    const innerWidth = Math.max(1, Math.round(rect.width - borderReveal * 2));
+    const innerHeight = Math.max(1, Math.round(rect.height - borderReveal * 2));
+    return `<rect x="${x}" y="${y}" width="${innerWidth}" height="${innerHeight}" fill="black"/>`;
+  });
+
+  const svg = [
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none">`,
+    '<rect x="0" y="0" width="100%" height="100%" fill="white"/>',
+    ...holeRects,
+    '</svg>',
+  ].join('');
+
+  const maskUrl = `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
+  rendererLayer.style.setProperty('-webkit-mask-image', maskUrl);
+  rendererLayer.style.setProperty('-webkit-mask-repeat', 'no-repeat');
+  rendererLayer.style.setProperty('-webkit-mask-size', '100% 100%');
+  rendererLayer.style.setProperty('-webkit-mask-mode', 'luminance');
+  rendererLayer.style.setProperty('mask-image', maskUrl);
+  rendererLayer.style.setProperty('mask-repeat', 'no-repeat');
+  rendererLayer.style.setProperty('mask-size', '100% 100%');
+  rendererLayer.style.setProperty('mask-mode', 'luminance');
+}
+
+function clearScopeEdgeMask(editorShell: HTMLElement): void {
+  const rendererLayer = editorShell.querySelector<HTMLElement>('.react-flow__renderer');
+  if (!rendererLayer) return;
+
+  rendererLayer.style.removeProperty('-webkit-mask-image');
+  rendererLayer.style.removeProperty('-webkit-mask-repeat');
+  rendererLayer.style.removeProperty('-webkit-mask-size');
+  rendererLayer.style.removeProperty('-webkit-mask-mode');
+  rendererLayer.style.removeProperty('mask-image');
+  rendererLayer.style.removeProperty('mask-repeat');
+  rendererLayer.style.removeProperty('mask-size');
+  rendererLayer.style.removeProperty('mask-mode');
 }
 
 function updateParamPlaceholder() {
