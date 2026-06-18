@@ -362,7 +362,9 @@ function NodeEditorInner() {
   const patch = useMemo(() => patchFromFlow(nodesWithCallbacks, edgesWithCallbacks), [nodesWithCallbacks, edgesWithCallbacks]);
   const patchJson = useMemo(() => patchToJson(patch), [patch]);
   const validation = useMemo(() => validatePatch(patch), [patch]);
-  const compileResult = useMemo(() => compilePatchToGlsl(patch, 'webgl2'), [patch]);
+  const compileResult = useMemo(() => compilePatchToGlsl(patch, 'webgl2', {
+    enableScopes: !uiHidden,
+  }), [patch, uiHidden]);
   const feedbackEdgeIds = useMemo(() => new Set(compileResult.feedbackLinkIds), [compileResult.feedbackLinkIds]);
   const displayEdges = useMemo(() => {
     return edgesWithCallbacks.map((edge) => {
@@ -647,6 +649,7 @@ function NodeEditorInner() {
         shaderArgs={compileResult.shaderArgs}
         delaySlots={compileResult.delaySlots}
         envelopeSlots={compileResult.envelopeSlots}
+        scopeSlots={compileResult.scopeSlots}
         mediaRequirements={compileResult.media}
         onFpsChange={setFps}
       />

@@ -257,6 +257,11 @@ select:hover {
   overflow: visible;
 }
 
+.shader-node-scope {
+  width: 224px;
+  background: transparent;
+}
+
 .react-flow__node.selected .shader-node,
 .shader-node-selected {
   outline: 2px solid #fff;
@@ -422,6 +427,24 @@ select:hover {
   min-height: 26px;
 }
 
+.shader-node-body-scope {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 128px;
+  padding: 0;
+  background: transparent;
+}
+
+.scope-preview {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: transparent;
+  pointer-events: none;
+}
+
 .shader-ports {
   display: flex;
   flex-direction: column;
@@ -504,6 +527,10 @@ select:hover {
 
 .shader-handle-input {
   left: -13px;
+}
+
+.shader-handle-scope {
+  left: -4px;
 }
 
 .shader-handle-output {

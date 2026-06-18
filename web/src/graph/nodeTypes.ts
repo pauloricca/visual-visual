@@ -178,6 +178,11 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
     ],
     outputs: [{ name: 'value' }],
   },
+  Scope: {
+    type: 'Scope',
+    inputs: [{ name: 'value', defaultValue: 0 }],
+    outputs: [],
+  },
   Camera: {
     type: 'Camera',
     inputs: [

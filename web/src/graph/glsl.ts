@@ -12,6 +12,7 @@ export interface CompileResult {
   feedbackTextureCount: number;
   delaySlots: ShaderDelaySlot[];
   envelopeSlots: ShaderEnvelopeSlot[];
+  scopeSlots: ShaderScopeSlot[];
   media: ShaderMediaRequirements;
 }
 
@@ -33,6 +34,10 @@ export interface ShaderEnvelopeSlot {
   samplerName: string;
 }
 
+export interface ShaderScopeSlot {
+  nodeId: string;
+}
+
 export interface ShaderMediaRequirements {
   useMic: boolean;
   useCamera: boolean;
@@ -40,7 +45,16 @@ export interface ShaderMediaRequirements {
 
 export type GlslTarget = 'desktop' | 'webgl2';
 
-export function compilePatchToGlsl(patch: Patch, target: GlslTarget = 'desktop'): CompileResult {
+interface CompileOptions {
+  enableScopes?: boolean;
+}
+
+export function compilePatchToGlsl(
+  patch: Patch,
+  target: GlslTarget = 'desktop',
+  options: CompileOptions = {},
+): CompileResult {
+  const enableScopes = options.enableScopes ?? true;
   const validation = validatePatch(patch);
   if (!validation.ok) {
     return {
@@ -53,6 +67,7 @@ export function compilePatchToGlsl(patch: Patch, target: GlslTarget = 'desktop')
       feedbackTextureCount: 0,
       delaySlots: [],
       envelopeSlots: [],
+      scopeSlots: [],
       media: emptyMediaRequirements(),
     };
   }
@@ -82,12 +97,14 @@ export function compilePatchToGlsl(patch: Patch, target: GlslTarget = 'desktop')
       feedbackTextureCount,
       delaySlots: [],
       envelopeSlots: [],
+      scopeSlots: [],
       media: emptyMediaRequirements(),
     };
   }
   const delayByNodeId = new Map(delaySlots.map((slot) => [slot.nodeId, slot]));
   const envelopeSlots = collectEnvelopeSlots(patch);
   const envelopeByNodeId = new Map(envelopeSlots.map((slot) => [slot.nodeId, slot]));
+  const scopeSlots = enableScopes ? collectScopeSlots(patch) : [];
   const output = patch.nodes.find((node) => node.type === 'Output');
   if (!output) {
     return {
@@ -100,6 +117,7 @@ export function compilePatchToGlsl(patch: Patch, target: GlslTarget = 'desktop')
       feedbackTextureCount,
       delaySlots,
       envelopeSlots,
+      scopeSlots,
       media: emptyMediaRequirements(),
     };
   }
@@ -137,6 +155,13 @@ export function compilePatchToGlsl(patch: Patch, target: GlslTarget = 'desktop')
       return resolveInput(node, 'value', context);
     });
     const envelopeExpressions = envelopeSlots.map((slot) => resolveOutput(slot.nodeId, 'value', context));
+    const scopeExpressions = scopeSlots.map((slot) => {
+      const node = nodes.get(slot.nodeId);
+      if (!node) {
+        throw new Error(`Scope node "${slot.nodeId}" does not exist.`);
+      }
+      return resolveInput(node, 'value', context);
+    });
 
     return {
       ok: true,
@@ -155,6 +180,8 @@ export function compilePatchToGlsl(patch: Patch, target: GlslTarget = 'desktop')
         delayExpressions,
         envelopeSlots,
         envelopeExpressions,
+        scopeSlots,
+        scopeExpressions,
         context.media,
       ),
       shaderArgs: context.shaderArgs,
@@ -164,6 +191,7 @@ export function compilePatchToGlsl(patch: Patch, target: GlslTarget = 'desktop')
       feedbackTextureCount,
       delaySlots,
       envelopeSlots,
+      scopeSlots,
       media: context.media,
     };
   } catch (error) {
@@ -177,6 +205,7 @@ export function compilePatchToGlsl(patch: Patch, target: GlslTarget = 'desktop')
       feedbackTextureCount,
       delaySlots,
       envelopeSlots,
+      scopeSlots,
       media: context.media,
     };
   }
@@ -499,10 +528,12 @@ function buildShader(
   delayExpressions: string[],
   envelopeSlots: ShaderEnvelopeSlot[],
   envelopeExpressions: string[],
+  scopeSlots: ShaderScopeSlot[],
+  scopeExpressions: string[],
   media: ShaderMediaRequirements,
 ): string {
   const hasFeedback = feedbackTextureCount > 0;
-  const hasStateOutputs = hasFeedback || delaySlots.length > 0 || envelopeSlots.length > 0;
+  const hasStateOutputs = hasFeedback || delaySlots.length > 0 || envelopeSlots.length > 0 || scopeSlots.length > 0;
   const fragmentOutput = hasStateOutputs ? 'layout(location = 0) out vec4 fragColor;' : 'out vec4 fragColor;';
   const feedbackOutputs = Array.from({ length: feedbackTextureCount }, (_, index) =>
     `layout(location = ${index + 1}) out vec4 feedbackColor${index};`,
@@ -514,6 +545,10 @@ function buildShader(
   const envelopeOutputs = envelopeSlots.map((slot, index) =>
     `layout(location = ${envelopeOutputOffset + index}) out vec4 envelopeColor${index};`,
   ).join('\n');
+  const scopeOutputOffset = envelopeOutputOffset + envelopeSlots.length;
+  const scopeOutputs = scopeSlots.map((slot, index) =>
+    `layout(location = ${scopeOutputOffset + index}) out vec4 scopeColor${index};`,
+  ).join('\n');
   const header =
     target === 'webgl2'
       ? `#version 300 es
@@ -522,12 +557,14 @@ precision highp int;
 ${fragmentOutput}
 ${feedbackOutputs}
 ${delayOutputs}
-${envelopeOutputs}`
+${envelopeOutputs}
+${scopeOutputs}`
       : `#version 330 core
 ${fragmentOutput}
 ${feedbackOutputs}
 ${delayOutputs}
 ${envelopeOutputs}
+${scopeOutputs}
 `;
   const feedbackUniforms = Array.from({ length: feedbackTextureCount }, (_, index) =>
     `uniform sampler2D u_feedback${index};`,
@@ -568,6 +605,8 @@ ${shaderArgUniforms}`
   delayColor${index} = vec4(${delayExpressions[index] ?? '0.0'}, 0.0, 0.0, 1.0);`).join('\n\n');
   const envelopeAssignments = envelopeSlots.map((slot, index) => `  // envelope ${formatCommentText(slot.nodeId)}
   envelopeColor${index} = vec4(${envelopeExpressions[index] ?? '0.0'}, 0.0, 0.0, 1.0);`).join('\n\n');
+  const scopeAssignments = scopeSlots.map((slot, index) => `  // scope ${formatCommentText(slot.nodeId)}
+  scopeColor${index} = scopePixel(${scopeExpressions[index] ?? '0.0'}, uv);`).join('\n\n');
 
   return `${header}
 uniform vec2 u_resolution;
@@ -621,6 +660,11 @@ float fbmNoise(vec2 p) {
   return value / max(total, 0.0001);
 }
 
+vec4 scopePixel(float value, vec2 uv) {
+  float normalized = clamp(value, 0.0, 1.0);
+  return vec4(vec3(normalized), 1.0);
+}
+
 void main() {
   vec2 uv = gl_FragCoord.xy / max(u_resolution, vec2(1.0));
   float x = uv.x;
@@ -635,6 +679,7 @@ ${intermediateStatements ? `\n${intermediateStatements}\n` : ''}
 ${feedbackAssignments ? `\n${feedbackAssignments}` : ''}
 ${delayAssignments ? `\n${delayAssignments}` : ''}
 ${envelopeAssignments ? `\n${envelopeAssignments}` : ''}
+${scopeAssignments ? `\n${scopeAssignments}` : ''}
 }
 `;
 }
@@ -705,6 +750,14 @@ function collectEnvelopeSlots(patch: Patch): ShaderEnvelopeSlot[] {
     .map((node) => ({
       nodeId: node.id,
       samplerName: `u_envelope_${toGlslIdentifier(node.id)}`,
+    }));
+}
+
+function collectScopeSlots(patch: Patch): ShaderScopeSlot[] {
+  return patch.nodes
+    .filter((node) => node.type === 'Scope')
+    .map((node) => ({
+      nodeId: node.id,
     }));
 }
 

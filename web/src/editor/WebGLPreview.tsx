@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { ShaderArg, ShaderDelaySlot, ShaderEnvelopeSlot, ShaderMediaRequirements } from '../graph/glsl';
+import type { ShaderArg, ShaderDelaySlot, ShaderEnvelopeSlot, ShaderMediaRequirements, ShaderScopeSlot } from '../graph/glsl';
 
 interface Props {
   fragmentShader: string;
@@ -7,6 +7,7 @@ interface Props {
   shaderArgs?: ShaderArg[];
   delaySlots?: ShaderDelaySlot[];
   envelopeSlots?: ShaderEnvelopeSlot[];
+  scopeSlots?: ShaderScopeSlot[];
   mediaRequirements?: ShaderMediaRequirements;
   onFpsChange?: (fps: number) => void;
 }
@@ -25,6 +26,7 @@ interface ProgramState {
   feedbackTextureCount: number;
   delaySlots: ShaderDelaySlot[];
   envelopeSlots: ShaderEnvelopeSlot[];
+  scopeSlots: ShaderScopeSlot[];
   mediaRequirements: ShaderMediaRequirements;
 }
 
@@ -39,11 +41,13 @@ interface StateResources {
   feedbackTextures: [WebGLTexture[], WebGLTexture[]];
   delayTextures: WebGLTexture[][];
   envelopeTextures: [WebGLTexture[], WebGLTexture[]];
+  scopeTextures: WebGLTexture[];
   width: number;
   height: number;
   feedbackTextureCount: number;
   delaySlotCount: number;
   envelopeSlotCount: number;
+  scopeSlotCount: number;
   feedbackReadIndex: 0 | 1;
   envelopeReadIndex: 0 | 1;
   delayWriteIndex: number;
@@ -72,6 +76,7 @@ export function WebGLPreview({
   shaderArgs = [],
   delaySlots = [],
   envelopeSlots = [],
+  scopeSlots = [],
   mediaRequirements = EMPTY_MEDIA_REQUIREMENTS,
   onFpsChange,
 }: Props) {
@@ -82,6 +87,7 @@ export function WebGLPreview({
   const shaderArgsRef = useRef<ShaderArg[]>(shaderArgs);
   const delaySlotsRef = useRef<ShaderDelaySlot[]>(delaySlots);
   const envelopeSlotsRef = useRef<ShaderEnvelopeSlot[]>(envelopeSlots);
+  const scopeSlotsRef = useRef<ShaderScopeSlot[]>(scopeSlots);
   const mediaRequirementsRef = useRef<ShaderMediaRequirements>(mediaRequirements);
   const onFpsChangeRef = useRef<Props['onFpsChange']>(onFpsChange);
   const blitProgramRef = useRef<BlitProgramState | null>(null);
@@ -132,7 +138,7 @@ export function WebGLPreview({
       if (program) {
         try {
           gl.bindVertexArray(vaoRef.current);
-          if (program.feedbackTextureCount > 0 || program.delaySlots.length > 0 || program.envelopeSlots.length > 0) {
+          if (program.feedbackTextureCount > 0 || program.delaySlots.length > 0 || program.envelopeSlots.length > 0 || program.scopeSlots.length > 0) {
             const blitProgramState = blitProgramRef.current;
             if (!blitProgramState) {
               throw new Error('Missing WebGL display program.');
@@ -145,7 +151,8 @@ export function WebGLPreview({
               resources.height !== canvas.height ||
               resources.feedbackTextureCount !== program.feedbackTextureCount ||
               resources.delaySlotCount !== program.delaySlots.length ||
-              resources.envelopeSlotCount !== program.envelopeSlots.length
+              resources.envelopeSlotCount !== program.envelopeSlots.length ||
+              resources.scopeSlotCount !== program.scopeSlots.length
             ) {
               if (resources) {
                 disposeStateResources(gl, resources);
@@ -157,6 +164,7 @@ export function WebGLPreview({
                 program.feedbackTextureCount,
                 program.delaySlots.length,
                 program.envelopeSlots.length,
+                program.scopeSlots.length,
               );
               stateResourcesRef.current = resources;
             }
@@ -172,6 +180,7 @@ export function WebGLPreview({
               shaderArgsRef.current,
               program.delaySlots,
               program.envelopeSlots,
+              program.scopeSlots,
               mediaResourcesRef.current,
             );
           } else {
@@ -235,6 +244,10 @@ export function WebGLPreview({
   useEffect(() => {
     envelopeSlotsRef.current = envelopeSlots;
   }, [envelopeSlots]);
+
+  useEffect(() => {
+    scopeSlotsRef.current = scopeSlots;
+  }, [scopeSlots]);
 
   useEffect(() => {
     mediaRequirementsRef.current = mediaRequirements;
@@ -304,6 +317,7 @@ export function WebGLPreview({
         feedbackTextureCount,
         delaySlots: delaySlotsRef.current,
         envelopeSlots: envelopeSlotsRef.current,
+        scopeSlots: scopeSlotsRef.current,
         mediaRequirements: mediaRequirementsRef.current,
       };
       if (previousProgram) {
@@ -353,6 +367,7 @@ function renderFeedbackFrame(
   shaderArgs: ShaderArg[],
   delaySlots: ShaderDelaySlot[],
   envelopeSlots: ShaderEnvelopeSlot[],
+  scopeSlots: ShaderScopeSlot[],
   mediaResources: MediaResources,
 ): void {
   const feedbackWriteIndex: 0 | 1 = resources.feedbackReadIndex === 0 ? 1 : 0;
@@ -399,6 +414,19 @@ function renderFeedbackFrame(
     drawBuffers.push(attachment);
   }
 
+  const scopeAttachmentOffset = envelopeAttachmentOffset + envelopeSlots.length;
+  for (let index = 0; index < scopeSlots.length; index += 1) {
+    const attachment = gl.COLOR_ATTACHMENT0 + scopeAttachmentOffset + index;
+    gl.framebufferTexture2D(
+      gl.FRAMEBUFFER,
+      attachment,
+      gl.TEXTURE_2D,
+      resources.scopeTextures[index],
+      0,
+    );
+    drawBuffers.push(attachment);
+  }
+
   gl.drawBuffers(drawBuffers);
 
   const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
@@ -435,6 +463,7 @@ function renderFeedbackFrame(
 
   setMediaUniforms(gl, program, mediaResources, envelopeTextureOffset + envelopeSlots.length);
   gl.drawArrays(gl.TRIANGLES, 0, 3);
+
   resources.feedbackReadIndex = feedbackWriteIndex;
   resources.envelopeReadIndex = envelopeWriteIndex;
   resources.delayWriteIndex = (resources.delayWriteIndex + 1) % DELAY_HISTORY_LENGTH;
@@ -447,6 +476,7 @@ function renderFeedbackFrame(
   gl.bindTexture(gl.TEXTURE_2D, resources.displayTexture);
   gl.uniform1i(blitProgram.uTexture, 0);
   gl.drawArrays(gl.TRIANGLES, 0, 3);
+  blitScopePreviews(gl, canvas, blitProgram, resources, scopeSlots);
 }
 
 function setCommonUniforms(
@@ -519,6 +549,61 @@ function delayFrameCount(slot: ShaderDelaySlot, shaderArgs: ShaderArg[]): number
 
 function positiveModulo(value: number, modulus: number): number {
   return ((value % modulus) + modulus) % modulus;
+}
+
+function blitScopePreviews(
+  gl: WebGL2RenderingContext,
+  canvas: HTMLCanvasElement,
+  blitProgram: BlitProgramState,
+  resources: StateResources,
+  scopeSlots: ShaderScopeSlot[],
+): void {
+  if (scopeSlots.length === 0) return;
+
+  const canvasRect = canvas.getBoundingClientRect();
+  if (canvasRect.width <= 0 || canvasRect.height <= 0) return;
+
+  const scaleX = canvas.width / canvasRect.width;
+  const scaleY = canvas.height / canvasRect.height;
+
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.drawBuffers([gl.BACK]);
+  gl.useProgram(blitProgram.program);
+  gl.uniform1i(blitProgram.uTexture, 0);
+  gl.enable(gl.SCISSOR_TEST);
+
+  for (let index = 0; index < scopeSlots.length; index += 1) {
+    const element = findScopePreviewElement(scopeSlots[index].nodeId);
+    if (!element) continue;
+
+    const rect = element.getBoundingClientRect();
+    const left = Math.max(rect.left, canvasRect.left);
+    const top = Math.max(rect.top, canvasRect.top);
+    const right = Math.min(rect.right, canvasRect.right);
+    const bottom = Math.min(rect.bottom, canvasRect.bottom);
+    if (right <= left || bottom <= top) continue;
+
+    const x = Math.round((left - canvasRect.left) * scaleX);
+    const y = Math.round((canvasRect.bottom - bottom) * scaleY);
+    const width = Math.max(1, Math.round((right - left) * scaleX));
+    const height = Math.max(1, Math.round((bottom - top) * scaleY));
+
+    gl.viewport(x, y, width, height);
+    gl.scissor(x, y, width, height);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, resources.scopeTextures[index]);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+  }
+
+  gl.disable(gl.SCISSOR_TEST);
+  gl.viewport(0, 0, canvas.width, canvas.height);
+}
+
+function findScopePreviewElement(nodeId: string): HTMLElement | null {
+  const escaped = typeof CSS !== 'undefined' && CSS.escape
+    ? CSS.escape(nodeId)
+    : nodeId.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  return document.querySelector<HTMLElement>(`[data-scope-node-id="${escaped}"]`);
 }
 
 async function startMic(
@@ -656,6 +741,7 @@ function createStateResources(
   feedbackTextureCount: number,
   delaySlotCount: number,
   envelopeSlotCount: number,
+  scopeSlotCount: number,
 ): StateResources {
   if (!gl.getExtension('EXT_color_buffer_float')) {
     throw new Error('Stateful nodes need EXT_color_buffer_float, which this browser/GPU did not expose.');
@@ -664,11 +750,12 @@ function createStateResources(
   const maxColorAttachments = gl.getParameter(gl.MAX_COLOR_ATTACHMENTS) as number;
   const maxDrawBuffers = gl.getParameter(gl.MAX_DRAW_BUFFERS) as number;
   const maxTextureUnits = gl.getParameter(gl.MAX_TEXTURE_IMAGE_UNITS) as number;
-  const stateOutputCount = feedbackTextureCount + delaySlotCount + envelopeSlotCount;
+  const stateOutputCount = feedbackTextureCount + delaySlotCount + envelopeSlotCount + scopeSlotCount;
+  const sampledStateCount = feedbackTextureCount + delaySlotCount + envelopeSlotCount;
   if (stateOutputCount + 1 > Math.min(maxColorAttachments, maxDrawBuffers)) {
     throw new Error(`This GPU can render ${Math.min(maxColorAttachments, maxDrawBuffers) - 1} state textures at once.`);
   }
-  if (stateOutputCount > maxTextureUnits) {
+  if (sampledStateCount > maxTextureUnits) {
     throw new Error(`This GPU can sample ${maxTextureUnits} state textures at once.`);
   }
 
@@ -701,17 +788,24 @@ function createStateResources(
     }
   }
 
+  const scopeTextures: WebGLTexture[] = [];
+  for (let index = 0; index < scopeSlotCount; index += 1) {
+    scopeTextures.push(createTexture(gl, width, height, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE));
+  }
+
   return {
     framebuffer,
     displayTexture,
     feedbackTextures,
     delayTextures,
     envelopeTextures,
+    scopeTextures,
     width,
     height,
     feedbackTextureCount,
     delaySlotCount,
     envelopeSlotCount,
+    scopeSlotCount,
     feedbackReadIndex: 0,
     envelopeReadIndex: 0,
     delayWriteIndex: 0,
@@ -758,6 +852,9 @@ function disposeStateResources(gl: WebGL2RenderingContext, resources: StateResou
     for (const texture of textureSet) {
       gl.deleteTexture(texture);
     }
+  }
+  for (const texture of resources.scopeTextures) {
+    gl.deleteTexture(texture);
   }
 }
 

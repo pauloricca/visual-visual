@@ -7,9 +7,15 @@ import type { ShaderFlowNode, ShaderNodeData } from './flowPatch';
 export function ShaderNode({ data, selected }: NodeProps<ShaderFlowNode>) {
   const node = data.patchNode;
   const definition = node.type ? getDefinition(node.type) : null;
+  const isScope = node.type === 'Scope';
+  const className = [
+    'shader-node',
+    selected ? 'shader-node-selected' : '',
+    isScope ? 'shader-node-scope' : '',
+  ].filter(Boolean).join(' ');
 
   return (
-    <div className={selected ? 'shader-node shader-node-selected' : 'shader-node'}>
+    <div className={className}>
       <div className="shader-node-title">
         <NodeTypePicker
           nodeType={node.type}
@@ -23,7 +29,21 @@ export function ShaderNode({ data, selected }: NodeProps<ShaderFlowNode>) {
           onChange={(nextId) => data.onIdChange(node.id, nextId)}
         />
       </div>
-      {definition ? (
+      {definition && isScope ? (
+        <div className="shader-node-body shader-node-body-scope">
+          <Handle
+            id="in:value"
+            type="target"
+            position={Position.Left}
+            className="shader-handle shader-handle-input shader-handle-scope"
+            onDoubleClick={(event) => {
+              event.stopPropagation();
+              data.onPortDoubleClick(node.id, 'input', 'value');
+            }}
+          />
+          <div className="scope-preview" data-scope-node-id={node.id} />
+        </div>
+      ) : definition ? (
         <div className="shader-node-body">
           <div className="shader-ports shader-inputs">
             {definition.inputs.map((input) => (

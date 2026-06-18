@@ -34,7 +34,8 @@ export type NodeType =
   | 'Noise'
   | 'Delay'
   | 'Camera'
-  | 'Envelope';
+  | 'Envelope'
+  | 'Scope';
 
 export interface Vec2 {
   x: number;
