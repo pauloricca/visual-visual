@@ -18,6 +18,7 @@ export type NodeType =
   | 'Step'
   | 'Smoothstep'
   | 'Mix'
+  | 'Map'
   | 'Min'
   | 'Max'
   | 'Clamp'
@@ -32,10 +33,13 @@ export type NodeType =
   | 'Quantise'
   | 'Distance'
   | 'Noise'
+  | 'Noise3'
+  | 'Noise3Fast'
   | 'Delay'
   | 'Camera'
   | 'Envelope'
-  | 'Scope';
+  | 'Scope'
+  | 'Meter';
 
 export interface Vec2 {
   x: number;
@@ -54,10 +58,13 @@ export interface Endpoint {
   port: string;
 }
 
+export type LinkMode = 'set' | 'add' | 'multiply';
+
 export interface PatchLink {
   from: Endpoint;
   to: Endpoint;
   weight?: number;
+  mode?: LinkMode;
 }
 
 export interface Patch {
@@ -69,6 +76,9 @@ export interface PortDefinition {
   name: string;
   defaultValue?: number;
   connectable?: boolean;
+  min?: number;
+  max?: number;
+  integer?: boolean;
 }
 
 export interface NodeDefinition {

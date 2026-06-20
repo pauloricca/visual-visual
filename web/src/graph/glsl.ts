@@ -13,6 +13,7 @@ export interface CompileResult {
   delaySlots: ShaderDelaySlot[];
   envelopeSlots: ShaderEnvelopeSlot[];
   scopeSlots: ShaderScopeSlot[];
+  meterSlots: ShaderMeterSlot[];
   media: ShaderMediaRequirements;
 }
 
@@ -35,6 +36,10 @@ export interface ShaderEnvelopeSlot {
 }
 
 export interface ShaderScopeSlot {
+  nodeId: string;
+}
+
+export interface ShaderMeterSlot {
   nodeId: string;
 }
 
@@ -68,6 +73,7 @@ export function compilePatchToGlsl(
       delaySlots: [],
       envelopeSlots: [],
       scopeSlots: [],
+      meterSlots: [],
       media: emptyMediaRequirements(),
     };
   }
@@ -98,6 +104,7 @@ export function compilePatchToGlsl(
       delaySlots: [],
       envelopeSlots: [],
       scopeSlots: [],
+      meterSlots: [],
       media: emptyMediaRequirements(),
     };
   }
@@ -105,6 +112,7 @@ export function compilePatchToGlsl(
   const envelopeSlots = collectEnvelopeSlots(patch);
   const envelopeByNodeId = new Map(envelopeSlots.map((slot) => [slot.nodeId, slot]));
   const scopeSlots = enableScopes ? collectScopeSlots(patch) : [];
+  const meterSlots = enableScopes ? collectMeterSlots(patch, incoming) : [];
   const output = patch.nodes.find((node) => node.type === 'Output');
   if (!output) {
     return {
@@ -118,6 +126,7 @@ export function compilePatchToGlsl(
       delaySlots,
       envelopeSlots,
       scopeSlots,
+      meterSlots,
       media: emptyMediaRequirements(),
     };
   }
@@ -162,6 +171,13 @@ export function compilePatchToGlsl(
       }
       return resolveInput(node, 'value', context);
     });
+    const meterExpressions = meterSlots.map((slot) => {
+      const node = nodes.get(slot.nodeId);
+      if (!node) {
+        throw new Error(`Meter node "${slot.nodeId}" does not exist.`);
+      }
+      return resolveInput(node, 'value', context);
+    });
 
     return {
       ok: true,
@@ -182,6 +198,8 @@ export function compilePatchToGlsl(
         envelopeExpressions,
         scopeSlots,
         scopeExpressions,
+        meterSlots,
+        meterExpressions,
         context.media,
       ),
       shaderArgs: context.shaderArgs,
@@ -192,6 +210,7 @@ export function compilePatchToGlsl(
       delaySlots,
       envelopeSlots,
       scopeSlots,
+      meterSlots,
       media: context.media,
     };
   } catch (error) {
@@ -206,6 +225,7 @@ export function compilePatchToGlsl(
       delaySlots,
       envelopeSlots,
       scopeSlots,
+      meterSlots,
       media: context.media,
     };
   }
@@ -242,25 +262,61 @@ interface GlslStatement {
 
 function resolveInput(node: PatchNode, port: string, context: CompileContext): string {
   const links = context.incoming.get(`${node.id}.${port}`) ?? [];
-  if (links.length === 1) {
-    const [link] = links;
-    const feedbackSlot = context.feedbackByLink.get(linkKey(link));
-    if (feedbackSlot) {
-      return readFeedback(feedbackSlot);
+  if (links.length > 0) {
+    return combineInputLinks(node, port, links, context);
+  }
+
+  return defaultInputArg(node, port, context);
+}
+
+function combineInputLinks(node: PatchNode, port: string, links: PatchLink[], context: CompileContext): string {
+  const setExpressions: string[] = [];
+  const addExpressions: string[] = [];
+  const multiplyExpressions: string[] = [];
+
+  for (const link of links) {
+    const expression = resolveLinkExpression(link, context);
+    switch (link.mode ?? 'set') {
+      case 'add':
+        addExpressions.push(expression);
+        break;
+      case 'multiply':
+        multiplyExpressions.push(expression);
+        break;
+      case 'set':
+        setExpressions.push(expression);
+        break;
     }
-    return applyLinkWeight(link, resolveOutput(link.from.node, link.from.port, context), context);
   }
 
-  if (links.length > 1) {
-    const expressions = links.map((link) => {
-      const feedbackSlot = context.feedbackByLink.get(linkKey(link));
-      return feedbackSlot
-        ? readFeedback(feedbackSlot)
-        : applyLinkWeight(link, resolveOutput(link.from.node, link.from.port, context), context);
-    });
-    return `((${expressions.join(' + ')}) / ${formatFloat(expressions.length)})`;
+  let expression = setExpressions.length > 0
+    ? averageExpressions(setExpressions)
+    : defaultInputArg(node, port, context);
+
+  if (addExpressions.length > 0) {
+    expression = `(${[expression, ...addExpressions].join(' + ')})`;
   }
 
+  if (multiplyExpressions.length > 0) {
+    expression = `(${[expression, ...multiplyExpressions].join(' * ')})`;
+  }
+
+  return expression;
+}
+
+function resolveLinkExpression(link: PatchLink, context: CompileContext): string {
+  const feedbackSlot = context.feedbackByLink.get(linkKey(link));
+  return feedbackSlot
+    ? readFeedback(feedbackSlot)
+    : applyLinkWeight(link, resolveOutput(link.from.node, link.from.port, context), context);
+}
+
+function averageExpressions(expressions: string[]): string {
+  if (expressions.length === 1) return expressions[0];
+  return `((${expressions.join(' + ')}) / ${formatFloat(expressions.length)})`;
+}
+
+function defaultInputArg(node: PatchNode, port: string, context: CompileContext): string {
   const arg = context.shaderArgNames.get(`${node.id}.${port}`);
   if (arg) {
     return arg;
@@ -311,7 +367,10 @@ function emitOutput(node: PatchNode, port: string, context: CompileContext): str
       }
       return emitSystem(port);
     case 'Output':
-      throw new Error('Output node has no output ports.');
+      if (port !== 'r' && port !== 'g' && port !== 'b') {
+        throw new Error(`Output.${port} is not supported.`);
+      }
+      return resolveInput(node, port, context);
     case 'Constant':
       assertPort(node, port, 'value');
       return resolveInput(node, 'value', context);
@@ -347,6 +406,8 @@ function emitOutput(node: PatchNode, port: string, context: CompileContext): str
       return `smoothstep(${input(node, 'edge0', context)}, ${input(node, 'edge1', context)}, ${input(node, 'value', context)})`;
     case 'Mix':
       return `mix(${input(node, 'a', context)}, ${input(node, 'b', context)}, ${input(node, 'amount', context)})`;
+    case 'Map':
+      return emitMap(node, context);
     case 'Min':
       return `min(${input(node, 'a', context)}, ${input(node, 'b', context)})`;
     case 'Max':
@@ -371,7 +432,7 @@ function emitOutput(node: PatchNode, port: string, context: CompileContext): str
       return emitHsv(node, port, context);
     case 'Gate':
       assertPort(node, port, 'value');
-      return `((${input(node, 'gate', context)} > ${input(node, 'threshold', context)}) ? ${input(node, 'value', context)} : 0.0)`;
+      return emitGate(node, context);
     case 'Rotate':
       return emitRotate(node, port, context);
     case 'Quantise':
@@ -381,7 +442,11 @@ function emitOutput(node: PatchNode, port: string, context: CompileContext): str
       assertPort(node, port, 'value');
       return `distance(vec2(${input(node, 'x1', context)}, ${input(node, 'y1', context)}), vec2(${input(node, 'x2', context)}, ${input(node, 'y2', context)}))`;
     case 'Noise':
-      return `fbmNoise(vec2(${input(node, 'x', context)}, ${input(node, 'y', context)}) * max(${input(node, 'scale', context)}, 0.0001) + vec2(${input(node, 'seed', context)} * 17.0, ${input(node, 'seed', context)} * 31.0))`;
+      return `fbmNoise(vec2(${input(node, 'x', context)}, ${input(node, 'y', context)}) * max(${input(node, 'scale', context)}, 0.0001) + vec2(${input(node, 'seed', context)} * 17.0, ${input(node, 'seed', context)} * 31.0), ${input(node, 'octaves', context)})`;
+    case 'Noise3':
+      return `fbmNoise3(vec3(${input(node, 'x', context)}, ${input(node, 'y', context)}, ${input(node, 'z', context)}) * max(${input(node, 'scale', context)}, 0.0001) + vec3(${input(node, 'seed', context)} * 17.0, ${input(node, 'seed', context)} * 31.0, ${input(node, 'seed', context)} * 47.0), ${input(node, 'octaves', context)})`;
+    case 'Noise3Fast':
+      return `fbmNoise3Fast(vec3(${input(node, 'x', context)}, ${input(node, 'y', context)}, ${input(node, 'z', context)}) * max(${input(node, 'scale', context)}, 0.0001) + vec3(${input(node, 'seed', context)} * 17.0, ${input(node, 'seed', context)} * 31.0, ${input(node, 'seed', context)} * 47.0), ${input(node, 'octaves', context)})`;
     case 'Camera':
       return emitCamera(node, port, context);
     case 'Envelope':
@@ -401,6 +466,18 @@ function emitOutput(node: PatchNode, port: string, context: CompileContext): str
 
 function oscillatorPhase(node: PatchNode, context: CompileContext): string {
   return `fract(u_time * ${input(node, 'frequency', context)} + ${input(node, 'phase', context)})`;
+}
+
+function emitMap(node: PatchNode, context: CompileContext): string {
+  const value = input(node, 'value', context);
+  const srcMin = input(node, 'srcMin', context);
+  const srcMax = input(node, 'srcMax', context);
+  const trgtMin = input(node, 'trgtMin', context);
+  const trgtMax = input(node, 'trgtMax', context);
+  const sourceRange = `(${srcMax} - ${srcMin})`;
+  const denominator = `((abs(${sourceRange}) < 0.000001) ? 0.000001 : ${sourceRange})`;
+
+  return `mix(${trgtMin}, ${trgtMax}, ((${value} - ${srcMin}) / ${denominator}))`;
 }
 
 function emitPolar(node: PatchNode, port: string, context: CompileContext): string {
@@ -424,6 +501,17 @@ function emitHsv(node: PatchNode, port: string, context: CompileContext): string
   }
 
   return `hsvToRgb(vec3(${input(node, 'h', context)}, ${input(node, 's', context)}, ${input(node, 'v', context)})).${channel}`;
+}
+
+function emitGate(node: PatchNode, context: CompileContext): string {
+  const value = input(node, 'value', context);
+  const gate = input(node, 'gate', context);
+  const minValue = input(node, 'min', context);
+  const maxValue = input(node, 'max', context);
+  const lower = `min(${minValue}, ${maxValue})`;
+  const upper = `max(${minValue}, ${maxValue})`;
+
+  return `((${gate} >= ${lower} && ${gate} <= ${upper}) ? ${value} : 0.0)`;
 }
 
 function emitRotate(node: PatchNode, port: string, context: CompileContext): string {
@@ -530,10 +618,12 @@ function buildShader(
   envelopeExpressions: string[],
   scopeSlots: ShaderScopeSlot[],
   scopeExpressions: string[],
+  meterSlots: ShaderMeterSlot[],
+  meterExpressions: string[],
   media: ShaderMediaRequirements,
 ): string {
   const hasFeedback = feedbackTextureCount > 0;
-  const hasStateOutputs = hasFeedback || delaySlots.length > 0 || envelopeSlots.length > 0 || scopeSlots.length > 0;
+  const hasStateOutputs = hasFeedback || delaySlots.length > 0 || envelopeSlots.length > 0 || scopeSlots.length > 0 || meterSlots.length > 0;
   const fragmentOutput = hasStateOutputs ? 'layout(location = 0) out vec4 fragColor;' : 'out vec4 fragColor;';
   const feedbackOutputs = Array.from({ length: feedbackTextureCount }, (_, index) =>
     `layout(location = ${index + 1}) out vec4 feedbackColor${index};`,
@@ -549,6 +639,10 @@ function buildShader(
   const scopeOutputs = scopeSlots.map((slot, index) =>
     `layout(location = ${scopeOutputOffset + index}) out vec4 scopeColor${index};`,
   ).join('\n');
+  const meterOutputOffset = scopeOutputOffset + scopeSlots.length;
+  const meterOutputs = meterSlots.map((slot, index) =>
+    `layout(location = ${meterOutputOffset + index}) out float meterValue${index};`,
+  ).join('\n');
   const header =
     target === 'webgl2'
       ? `#version 300 es
@@ -558,13 +652,15 @@ ${fragmentOutput}
 ${feedbackOutputs}
 ${delayOutputs}
 ${envelopeOutputs}
-${scopeOutputs}`
+${scopeOutputs}
+${meterOutputs}`
       : `#version 330 core
 ${fragmentOutput}
 ${feedbackOutputs}
 ${delayOutputs}
 ${envelopeOutputs}
 ${scopeOutputs}
+${meterOutputs}
 `;
   const feedbackUniforms = Array.from({ length: feedbackTextureCount }, (_, index) =>
     `uniform sampler2D u_feedback${index};`,
@@ -607,6 +703,8 @@ ${shaderArgUniforms}`
   envelopeColor${index} = vec4(${envelopeExpressions[index] ?? '0.0'}, 0.0, 0.0, 1.0);`).join('\n\n');
   const scopeAssignments = scopeSlots.map((slot, index) => `  // scope ${formatCommentText(slot.nodeId)}
   scopeColor${index} = scopePixel(${scopeExpressions[index] ?? '0.0'}, uv);`).join('\n\n');
+  const meterAssignments = meterSlots.map((slot, index) => `  // meter ${formatCommentText(slot.nodeId)}
+  meterValue${index} = ${meterExpressions[index] ?? '0.0'};`).join('\n\n');
 
   return `${header}
 uniform vec2 u_resolution;
@@ -644,16 +742,124 @@ float perlinNoise(vec2 p) {
   return 0.5 + 0.5 * mix(x0, x1, u.y);
 }
 
-float fbmNoise(vec2 p) {
+float fbmNoise(vec2 p, float octaves) {
   float value = 0.0;
   float amplitude = 0.5;
   float total = 0.0;
+  float octaveLimit = clamp(floor(octaves + 0.5), 1.0, 4.0);
   mat2 warp = mat2(1.6, 1.2, -1.2, 1.6);
 
   for (int octave = 0; octave < 4; octave++) {
+    if (float(octave) >= octaveLimit) {
+      break;
+    }
     value += amplitude * perlinNoise(p);
     total += amplitude;
     p = warp * p + vec2(13.1, 17.7);
+    amplitude *= 0.5;
+  }
+
+  return value / max(total, 0.0001);
+}
+
+vec3 noiseGradient3(vec3 p) {
+  vec3 hash = fract(sin(vec3(
+    dot(p, vec3(127.1, 311.7, 74.7)),
+    dot(p, vec3(269.5, 183.3, 246.1)),
+    dot(p, vec3(113.5, 271.9, 124.6))
+  )) * 43758.5453123);
+  return normalize(hash * 2.0 - 1.0 + vec3(0.0001));
+}
+
+float perlinNoise3(vec3 p) {
+  vec3 i = floor(p);
+  vec3 f = fract(p);
+  vec3 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+
+  float n000 = dot(noiseGradient3(i + vec3(0.0, 0.0, 0.0)), f - vec3(0.0, 0.0, 0.0));
+  float n100 = dot(noiseGradient3(i + vec3(1.0, 0.0, 0.0)), f - vec3(1.0, 0.0, 0.0));
+  float n010 = dot(noiseGradient3(i + vec3(0.0, 1.0, 0.0)), f - vec3(0.0, 1.0, 0.0));
+  float n110 = dot(noiseGradient3(i + vec3(1.0, 1.0, 0.0)), f - vec3(1.0, 1.0, 0.0));
+  float n001 = dot(noiseGradient3(i + vec3(0.0, 0.0, 1.0)), f - vec3(0.0, 0.0, 1.0));
+  float n101 = dot(noiseGradient3(i + vec3(1.0, 0.0, 1.0)), f - vec3(1.0, 0.0, 1.0));
+  float n011 = dot(noiseGradient3(i + vec3(0.0, 1.0, 1.0)), f - vec3(0.0, 1.0, 1.0));
+  float n111 = dot(noiseGradient3(i + vec3(1.0, 1.0, 1.0)), f - vec3(1.0, 1.0, 1.0));
+
+  float nx00 = mix(n000, n100, u.x);
+  float nx10 = mix(n010, n110, u.x);
+  float nx01 = mix(n001, n101, u.x);
+  float nx11 = mix(n011, n111, u.x);
+  float nxy0 = mix(nx00, nx10, u.y);
+  float nxy1 = mix(nx01, nx11, u.y);
+  return 0.5 + 0.5 * mix(nxy0, nxy1, u.z);
+}
+
+float fbmNoise3(vec3 p, float octaves) {
+  float value = 0.0;
+  float amplitude = 0.5;
+  float total = 0.0;
+  float octaveLimit = clamp(floor(octaves + 0.5), 1.0, 4.0);
+  mat3 warp = mat3(
+    1.4, 1.0, 0.8,
+    -0.8, 1.5, 0.6,
+    0.6, -0.7, 1.6
+  );
+
+  for (int octave = 0; octave < 4; octave++) {
+    if (float(octave) >= octaveLimit) {
+      break;
+    }
+    value += amplitude * perlinNoise3(p);
+    total += amplitude;
+    p = warp * p + vec3(13.1, 17.7, 23.3);
+    amplitude *= 0.5;
+  }
+
+  return value / max(total, 0.0001);
+}
+
+float hashNoise3Fast(vec3 p) {
+  p = fract(p * 0.1031);
+  p += dot(p, p.yzx + 33.33);
+  return fract((p.x + p.y) * p.z);
+}
+
+float valueNoise3Fast(vec3 p) {
+  vec3 i = floor(p);
+  vec3 f = fract(p);
+  vec3 u = f * f * (3.0 - 2.0 * f);
+
+  float n000 = hashNoise3Fast(i + vec3(0.0, 0.0, 0.0));
+  float n100 = hashNoise3Fast(i + vec3(1.0, 0.0, 0.0));
+  float n010 = hashNoise3Fast(i + vec3(0.0, 1.0, 0.0));
+  float n110 = hashNoise3Fast(i + vec3(1.0, 1.0, 0.0));
+  float n001 = hashNoise3Fast(i + vec3(0.0, 0.0, 1.0));
+  float n101 = hashNoise3Fast(i + vec3(1.0, 0.0, 1.0));
+  float n011 = hashNoise3Fast(i + vec3(0.0, 1.0, 1.0));
+  float n111 = hashNoise3Fast(i + vec3(1.0, 1.0, 1.0));
+
+  float nx00 = mix(n000, n100, u.x);
+  float nx10 = mix(n010, n110, u.x);
+  float nx01 = mix(n001, n101, u.x);
+  float nx11 = mix(n011, n111, u.x);
+  float nxy0 = mix(nx00, nx10, u.y);
+  float nxy1 = mix(nx01, nx11, u.y);
+  return mix(nxy0, nxy1, u.z);
+}
+
+float fbmNoise3Fast(vec3 p, float octaves) {
+  float value = 0.0;
+  float amplitude = 0.5;
+  float total = 0.0;
+  float octaveLimit = clamp(floor(octaves + 0.5), 1.0, 4.0);
+
+  for (int octave = 0; octave < 4; octave++) {
+    if (float(octave) >= octaveLimit) {
+      break;
+    }
+    value += amplitude * valueNoise3Fast(p);
+    total += amplitude;
+    p = p * 2.03 + vec3(13.1, 17.7, 23.3);
     amplitude *= 0.5;
   }
 
@@ -680,6 +886,7 @@ ${feedbackAssignments ? `\n${feedbackAssignments}` : ''}
 ${delayAssignments ? `\n${delayAssignments}` : ''}
 ${envelopeAssignments ? `\n${envelopeAssignments}` : ''}
 ${scopeAssignments ? `\n${scopeAssignments}` : ''}
+${meterAssignments ? `\n${meterAssignments}` : ''}
 }
 `;
 }
@@ -703,7 +910,9 @@ function collectShaderArgs(patch: Patch, incoming: Map<string, PatchLink[]>): Sh
   for (const node of patch.nodes) {
     const definition = getDefinition(node.type);
     for (const input of definition.inputs) {
-      if ((incoming.get(`${node.id}.${input.name}`) ?? []).length > 0) continue;
+      const inputLinks = incoming.get(`${node.id}.${input.name}`) ?? [];
+      if (node.type === 'Meter' && input.name === 'value' && inputLinks.length === 0) continue;
+      if (inputLinks.some((link) => (link.mode ?? 'set') === 'set')) continue;
 
       args.push({
         name: makeShaderArgName(node.id, input.name, usedNames),
@@ -756,6 +965,14 @@ function collectEnvelopeSlots(patch: Patch): ShaderEnvelopeSlot[] {
 function collectScopeSlots(patch: Patch): ShaderScopeSlot[] {
   return patch.nodes
     .filter((node) => node.type === 'Scope')
+    .map((node) => ({
+      nodeId: node.id,
+    }));
+}
+
+function collectMeterSlots(patch: Patch, incoming: Map<string, PatchLink[]>): ShaderMeterSlot[] {
+  return patch.nodes
+    .filter((node) => node.type === 'Meter' && (incoming.get(`${node.id}.value`) ?? []).length > 0)
     .map((node) => ({
       nodeId: node.id,
     }));

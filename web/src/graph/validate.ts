@@ -41,6 +41,9 @@ export function validatePatch(patch: Patch): ValidationResult {
     } else if (!acceptsInputLink(target.type, link.to.port)) {
       errors.push(`Node "${target.id}" input "${link.to.port}" only accepts scalar values.`);
     }
+    if (link.mode !== undefined && link.mode !== 'set' && link.mode !== 'add' && link.mode !== 'multiply') {
+      errors.push(`Link "${linkKey(link)}" has an unknown mode "${String(link.mode)}".`);
+    }
 
     inputTargets.add(endpointKey(link.to));
   }

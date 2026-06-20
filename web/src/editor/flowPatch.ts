@@ -1,5 +1,5 @@
 import type { Edge, Node } from '@xyflow/react';
-import type { NodeType, Patch, PatchLink, PatchNode } from '../graph/types';
+import type { LinkMode, NodeType, Patch, PatchLink, PatchNode } from '../graph/types';
 
 export type EditorPatchNode = Omit<PatchNode, 'type'> & {
   type: NodeType | null;
@@ -20,7 +20,9 @@ export type ShaderFlowNode = Node<ShaderNodeData, 'shaderNode'>;
 
 export interface ShaderEdgeData extends Record<string, unknown> {
   weight: number;
+  mode: LinkMode;
   onWeightChange: (edgeId: string, weight: number) => void;
+  onModeChange: (edgeId: string, mode: LinkMode) => void;
   onInsertNode: (edgeId: string) => void;
 }
 
@@ -50,6 +52,7 @@ export interface PersistedEditorState {
     target: string;
     targetHandle: string | null;
     weight?: number;
+    mode?: LinkMode;
   }>;
 }
 
@@ -94,7 +97,9 @@ export function toFlowEdges(
     targetHandle: `in:${link.to.port}`,
     data: {
       weight: link.weight ?? 1,
+      mode: link.mode ?? 'set',
       onWeightChange,
+      onModeChange: noopModeChange,
       onInsertNode,
     },
     className: 'shader-edge',
@@ -143,7 +148,9 @@ export function editorStateToFlowEdges(
     type: 'shaderEdge',
     data: {
       weight: edge.weight ?? 1,
+      mode: edge.mode ?? 'set',
       onWeightChange,
+      onModeChange: noopModeChange,
       onInsertNode,
     },
     className: 'shader-edge',
@@ -151,6 +158,10 @@ export function editorStateToFlowEdges(
 }
 
 function noopInsertNode() {
+  // Replaced after React state exists.
+}
+
+function noopModeChange() {
   // Replaced after React state exists.
 }
 
@@ -175,6 +186,7 @@ export function flowToEditorState(
       target: edge.target,
       targetHandle: edge.targetHandle ?? null,
       weight: edge.data?.weight ?? 1,
+      mode: edge.data?.mode ?? 'set',
     })),
   };
 }
@@ -216,6 +228,7 @@ export function linkFromEdge(edge: Edge): PatchLink | null {
       from: { node: edge.source, port: sourcePort.port },
       to: { node: edge.target, port: targetPort.port },
       weight: edge.data?.weight as number | undefined,
+      mode: edge.data?.mode as LinkMode | undefined,
     };
   }
 
@@ -224,6 +237,7 @@ export function linkFromEdge(edge: Edge): PatchLink | null {
       from: { node: edge.target, port: targetPort.port },
       to: { node: edge.source, port: sourcePort.port },
       weight: edge.data?.weight as number | undefined,
+      mode: edge.data?.mode as LinkMode | undefined,
     };
   }
 

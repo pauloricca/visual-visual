@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
-import type { ShaderArg, ShaderDelaySlot, ShaderEnvelopeSlot, ShaderMediaRequirements, ShaderScopeSlot } from '../graph/glsl';
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import type { Dispatch, SetStateAction } from 'react';
+import type { ShaderArg, ShaderDelaySlot, ShaderEnvelopeSlot, ShaderMediaRequirements, ShaderMeterSlot, ShaderScopeSlot } from '../graph/glsl';
 
 interface Props {
   fragmentShader: string;
@@ -8,8 +9,13 @@ interface Props {
   delaySlots?: ShaderDelaySlot[];
   envelopeSlots?: ShaderEnvelopeSlot[];
   scopeSlots?: ShaderScopeSlot[];
+  meterSlots?: ShaderMeterSlot[];
   mediaRequirements?: ShaderMediaRequirements;
   onFpsChange?: (fps: number) => void;
+}
+
+export interface WebGLPreviewHandle {
+  downloadScreenshot: () => void;
 }
 
 interface ProgramState {
@@ -27,6 +33,7 @@ interface ProgramState {
   delaySlots: ShaderDelaySlot[];
   envelopeSlots: ShaderEnvelopeSlot[];
   scopeSlots: ShaderScopeSlot[];
+  meterSlots: ShaderMeterSlot[];
   mediaRequirements: ShaderMediaRequirements;
 }
 
@@ -35,19 +42,31 @@ interface BlitProgramState {
   uTexture: WebGLUniformLocation | null;
 }
 
+interface ReduceProgramState {
+  program: WebGLProgram;
+  uTexture: WebGLUniformLocation | null;
+  uSourceSize: WebGLUniformLocation | null;
+  uInitialPass: WebGLUniformLocation | null;
+}
+
 interface StateResources {
   framebuffer: WebGLFramebuffer;
+  meterFramebuffer: WebGLFramebuffer;
   displayTexture: WebGLTexture;
   feedbackTextures: [WebGLTexture[], WebGLTexture[]];
   delayTextures: WebGLTexture[][];
   envelopeTextures: [WebGLTexture[], WebGLTexture[]];
   scopeTextures: WebGLTexture[];
+  meterTextures: WebGLTexture[];
+  meterReductionTextures: Array<[WebGLTexture, WebGLTexture]>;
+  meterReadback: Float32Array<ArrayBuffer>;
   width: number;
   height: number;
   feedbackTextureCount: number;
   delaySlotCount: number;
   envelopeSlotCount: number;
   scopeSlotCount: number;
+  meterSlotCount: number;
   feedbackReadIndex: 0 | 1;
   envelopeReadIndex: 0 | 1;
   delayWriteIndex: number;
@@ -61,25 +80,33 @@ interface MediaResources {
   cameraStream: MediaStream | null;
   cameraVideo: HTMLVideoElement | null;
   cameraTexture: WebGLTexture | null;
+  cameraStartInFlight: boolean;
+  cameraRetryBlocked: boolean;
+  cameraRequestId: number;
 }
+
+type SetPreviewError = Dispatch<SetStateAction<string | null>>;
 
 const MAX_DELAY_FRAMES = 32;
 const DELAY_HISTORY_LENGTH = MAX_DELAY_FRAMES + 1;
+const CAMERA_RETRY_INTERVAL_MS = 1000;
+const METER_UPDATE_INTERVAL_FRAMES = 6;
 const EMPTY_MEDIA_REQUIREMENTS: ShaderMediaRequirements = {
   useMic: false,
   useCamera: false,
 };
 
-export function WebGLPreview({
+export const WebGLPreview = forwardRef<WebGLPreviewHandle, Props>(function WebGLPreview({
   fragmentShader,
   feedbackTextureCount = 0,
   shaderArgs = [],
   delaySlots = [],
   envelopeSlots = [],
   scopeSlots = [],
+  meterSlots = [],
   mediaRequirements = EMPTY_MEDIA_REQUIREMENTS,
   onFpsChange,
-}: Props) {
+}: Props, ref) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const glRef = useRef<WebGL2RenderingContext | null>(null);
   const vaoRef = useRef<WebGLVertexArrayObject | null>(null);
@@ -88,9 +115,11 @@ export function WebGLPreview({
   const delaySlotsRef = useRef<ShaderDelaySlot[]>(delaySlots);
   const envelopeSlotsRef = useRef<ShaderEnvelopeSlot[]>(envelopeSlots);
   const scopeSlotsRef = useRef<ShaderScopeSlot[]>(scopeSlots);
+  const meterSlotsRef = useRef<ShaderMeterSlot[]>(meterSlots);
   const mediaRequirementsRef = useRef<ShaderMediaRequirements>(mediaRequirements);
   const onFpsChangeRef = useRef<Props['onFpsChange']>(onFpsChange);
   const blitProgramRef = useRef<BlitProgramState | null>(null);
+  const reduceProgramRef = useRef<ReduceProgramState | null>(null);
   const stateResourcesRef = useRef<StateResources | null>(null);
   const mediaResourcesRef = useRef<MediaResources>({
     micStream: null,
@@ -100,11 +129,40 @@ export function WebGLPreview({
     cameraStream: null,
     cameraVideo: null,
     cameraTexture: null,
+    cameraStartInFlight: false,
+    cameraRetryBlocked: false,
+    cameraRequestId: 0,
   });
   const frameRef = useRef(0);
   const startedAtRef = useRef(performance.now());
   const fpsSampleRef = useRef({ frames: 0, lastTime: performance.now() });
   const [error, setError] = useState<string | null>(null);
+
+  useImperativeHandle(ref, () => ({
+    downloadScreenshot: () => {
+      const canvas = canvasRef.current;
+      if (!canvas) {
+        setError('Screenshot unavailable: missing canvas.');
+        return;
+      }
+
+      canvas.toBlob((blob) => {
+        if (!blob) {
+          setError('Screenshot unavailable: could not encode PNG.');
+          return;
+        }
+
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `visual-visual-${formatScreenshotTimestamp(new Date())}.png`;
+        document.body.append(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+      }, 'image/png');
+    },
+  }), []);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -114,7 +172,7 @@ export function WebGLPreview({
       antialias: false,
       depth: false,
       stencil: false,
-      preserveDrawingBuffer: false,
+      preserveDrawingBuffer: true,
     });
 
     if (!gl) {
@@ -130,6 +188,13 @@ export function WebGLPreview({
       program: blitProgram,
       uTexture: gl.getUniformLocation(blitProgram, 'u_texture'),
     };
+    const reduceProgram = createProgram(gl, METER_REDUCE_FRAGMENT_SHADER, BLIT_VERTEX_SHADER);
+    reduceProgramRef.current = {
+      program: reduceProgram,
+      uTexture: gl.getUniformLocation(reduceProgram, 'u_texture'),
+      uSourceSize: gl.getUniformLocation(reduceProgram, 'u_source_size'),
+      uInitialPass: gl.getUniformLocation(reduceProgram, 'u_initial_pass'),
+    };
 
     let animationFrame = 0;
     const render = () => {
@@ -138,10 +203,14 @@ export function WebGLPreview({
       if (program) {
         try {
           gl.bindVertexArray(vaoRef.current);
-          if (program.feedbackTextureCount > 0 || program.delaySlots.length > 0 || program.envelopeSlots.length > 0 || program.scopeSlots.length > 0) {
+          if (program.feedbackTextureCount > 0 || program.delaySlots.length > 0 || program.envelopeSlots.length > 0 || program.scopeSlots.length > 0 || program.meterSlots.length > 0) {
             const blitProgramState = blitProgramRef.current;
+            const reduceProgramState = reduceProgramRef.current;
             if (!blitProgramState) {
               throw new Error('Missing WebGL display program.');
+            }
+            if (!reduceProgramState) {
+              throw new Error('Missing WebGL meter program.');
             }
 
             let resources = stateResourcesRef.current;
@@ -152,7 +221,8 @@ export function WebGLPreview({
               resources.feedbackTextureCount !== program.feedbackTextureCount ||
               resources.delaySlotCount !== program.delaySlots.length ||
               resources.envelopeSlotCount !== program.envelopeSlots.length ||
-              resources.scopeSlotCount !== program.scopeSlots.length
+              resources.scopeSlotCount !== program.scopeSlots.length ||
+              resources.meterSlotCount !== program.meterSlots.length
             ) {
               if (resources) {
                 disposeStateResources(gl, resources);
@@ -165,6 +235,7 @@ export function WebGLPreview({
                 program.delaySlots.length,
                 program.envelopeSlots.length,
                 program.scopeSlots.length,
+                program.meterSlots.length,
               );
               stateResourcesRef.current = resources;
             }
@@ -174,6 +245,7 @@ export function WebGLPreview({
               canvas,
               program,
               blitProgramState,
+              reduceProgramState,
               resources,
               frameRef.current,
               startedAtRef.current,
@@ -181,6 +253,7 @@ export function WebGLPreview({
               program.delaySlots,
               program.envelopeSlots,
               program.scopeSlots,
+              program.meterSlots,
               mediaResourcesRef.current,
             );
           } else {
@@ -219,6 +292,10 @@ export function WebGLPreview({
         gl.deleteProgram(blitProgramRef.current.program);
         blitProgramRef.current = null;
       }
+      if (reduceProgramRef.current) {
+        gl.deleteProgram(reduceProgramRef.current.program);
+        reduceProgramRef.current = null;
+      }
       if (stateResourcesRef.current) {
         disposeStateResources(gl, stateResourcesRef.current);
         stateResourcesRef.current = null;
@@ -250,6 +327,10 @@ export function WebGLPreview({
   }, [scopeSlots]);
 
   useEffect(() => {
+    meterSlotsRef.current = meterSlots;
+  }, [meterSlots]);
+
+  useEffect(() => {
     mediaRequirementsRef.current = mediaRequirements;
   }, [mediaRequirements]);
 
@@ -271,17 +352,37 @@ export function WebGLPreview({
 
   useEffect(() => {
     const gl = glRef.current;
-    if (mediaRequirements.useCamera && gl) {
-      void startCamera(gl, mediaResourcesRef.current, setError);
-    } else if (gl) {
+    if (!gl) return;
+
+    if (!mediaRequirements.useCamera) {
       stopCamera(gl, mediaResourcesRef.current);
+      return;
     }
 
-    return () => {
-      const currentGl = glRef.current;
-      if (currentGl) {
-        stopCamera(currentGl, mediaResourcesRef.current);
+    const mediaResources = mediaResourcesRef.current;
+    mediaResources.cameraRetryBlocked = false;
+
+    const ensureCameraIsRunning = () => {
+      void ensureCamera(gl, mediaResources, setError);
+    };
+    const ensureCameraAfterWake = () => {
+      if (document.visibilityState === 'visible') {
+        ensureCameraIsRunning();
       }
+    };
+
+    ensureCameraIsRunning();
+    const retryInterval = window.setInterval(ensureCameraIsRunning, CAMERA_RETRY_INTERVAL_MS);
+    document.addEventListener('visibilitychange', ensureCameraAfterWake);
+    window.addEventListener('focus', ensureCameraIsRunning);
+    window.addEventListener('pageshow', ensureCameraIsRunning);
+
+    return () => {
+      window.clearInterval(retryInterval);
+      document.removeEventListener('visibilitychange', ensureCameraAfterWake);
+      window.removeEventListener('focus', ensureCameraIsRunning);
+      window.removeEventListener('pageshow', ensureCameraIsRunning);
+      stopCamera(gl, mediaResources);
     };
   }, [mediaRequirements.useCamera]);
 
@@ -318,6 +419,7 @@ export function WebGLPreview({
         delaySlots: delaySlotsRef.current,
         envelopeSlots: envelopeSlotsRef.current,
         scopeSlots: scopeSlotsRef.current,
+        meterSlots: meterSlotsRef.current,
         mediaRequirements: mediaRequirementsRef.current,
       };
       if (previousProgram) {
@@ -340,6 +442,19 @@ export function WebGLPreview({
       {error ? <div className="webgl-error">{error}</div> : null}
     </>
   );
+});
+
+function formatScreenshotTimestamp(date: Date): string {
+  const pad = (value: number) => value.toString().padStart(2, '0');
+  return [
+    date.getFullYear(),
+    pad(date.getMonth() + 1),
+    pad(date.getDate()),
+    '-',
+    pad(date.getHours()),
+    pad(date.getMinutes()),
+    pad(date.getSeconds()),
+  ].join('');
 }
 
 function updateFps(
@@ -361,6 +476,7 @@ function renderFeedbackFrame(
   canvas: HTMLCanvasElement,
   program: ProgramState,
   blitProgram: BlitProgramState,
+  reduceProgram: ReduceProgramState,
   resources: StateResources,
   frame: number,
   startedAt: number,
@@ -368,6 +484,7 @@ function renderFeedbackFrame(
   delaySlots: ShaderDelaySlot[],
   envelopeSlots: ShaderEnvelopeSlot[],
   scopeSlots: ShaderScopeSlot[],
+  meterSlots: ShaderMeterSlot[],
   mediaResources: MediaResources,
 ): void {
   const feedbackWriteIndex: 0 | 1 = resources.feedbackReadIndex === 0 ? 1 : 0;
@@ -427,6 +544,19 @@ function renderFeedbackFrame(
     drawBuffers.push(attachment);
   }
 
+  const meterAttachmentOffset = scopeAttachmentOffset + scopeSlots.length;
+  for (let index = 0; index < meterSlots.length; index += 1) {
+    const attachment = gl.COLOR_ATTACHMENT0 + meterAttachmentOffset + index;
+    gl.framebufferTexture2D(
+      gl.FRAMEBUFFER,
+      attachment,
+      gl.TEXTURE_2D,
+      resources.meterTextures[index],
+      0,
+    );
+    drawBuffers.push(attachment);
+  }
+
   gl.drawBuffers(drawBuffers);
 
   const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
@@ -477,6 +607,9 @@ function renderFeedbackFrame(
   gl.uniform1i(blitProgram.uTexture, 0);
   gl.drawArrays(gl.TRIANGLES, 0, 3);
   blitScopePreviews(gl, canvas, blitProgram, resources, scopeSlots);
+  if (frame % METER_UPDATE_INTERVAL_FRAMES === 0) {
+    updateMeterLabels(gl, canvas, reduceProgram, resources, meterSlots);
+  }
 }
 
 function setCommonUniforms(
@@ -518,6 +651,8 @@ function setMediaUniforms(
     throw new Error(`This GPU can sample ${maxTextureUnits} textures at once.`);
   }
 
+  // Upload on the camera's unit so updateCameraTexture cannot clear a state sampler.
+  gl.activeTexture(gl.TEXTURE0 + firstTextureUnit);
   const texture = getCameraTexture(gl, mediaResources);
   updateCameraTexture(gl, mediaResources, texture);
   gl.activeTexture(gl.TEXTURE0 + firstTextureUnit);
@@ -599,6 +734,85 @@ function blitScopePreviews(
   gl.viewport(0, 0, canvas.width, canvas.height);
 }
 
+function updateMeterLabels(
+  gl: WebGL2RenderingContext,
+  canvas: HTMLCanvasElement,
+  reduceProgram: ReduceProgramState,
+  resources: StateResources,
+  meterSlots: ShaderMeterSlot[],
+): void {
+  if (meterSlots.length === 0) return;
+
+  gl.bindFramebuffer(gl.FRAMEBUFFER, resources.meterFramebuffer);
+  gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
+  gl.useProgram(reduceProgram.program);
+  gl.uniform1i(reduceProgram.uTexture, 0);
+
+  for (let index = 0; index < meterSlots.length; index += 1) {
+    const valueRange = reduceMeterTexture(
+      gl,
+      canvas.width,
+      canvas.height,
+      reduceProgram,
+      resources,
+      resources.meterTextures[index],
+      resources.meterReductionTextures[index],
+    );
+    const element = findMeterLabelElement(meterSlots[index].nodeId);
+    if (element) {
+      updateMeterLabelElement(element, valueRange);
+    }
+  }
+
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.drawBuffers([gl.BACK]);
+  gl.viewport(0, 0, canvas.width, canvas.height);
+}
+
+function reduceMeterTexture(
+  gl: WebGL2RenderingContext,
+  sourceWidth: number,
+  sourceHeight: number,
+  reduceProgram: ReduceProgramState,
+  resources: StateResources,
+  initialTexture: WebGLTexture,
+  reductionTextures: [WebGLTexture, WebGLTexture],
+): { min: number; max: number } {
+  let texture = initialTexture;
+  let width = sourceWidth;
+  let height = sourceHeight;
+  let writeIndex: 0 | 1 = 0;
+  let initialPass = true;
+
+  while (initialPass || width > 1 || height > 1) {
+    const nextWidth = Math.max(1, Math.ceil(width / 2));
+    const nextHeight = Math.max(1, Math.ceil(height / 2));
+    const outputTexture = reductionTextures[writeIndex];
+
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, outputTexture, 0);
+    gl.viewport(0, 0, nextWidth, nextHeight);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.uniform2f(reduceProgram.uSourceSize, width, height);
+    gl.uniform1i(reduceProgram.uInitialPass, initialPass ? 1 : 0);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+    texture = outputTexture;
+    width = nextWidth;
+    height = nextHeight;
+    writeIndex = writeIndex === 0 ? 1 : 0;
+    initialPass = false;
+  }
+
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+  gl.readBuffer(gl.COLOR_ATTACHMENT0);
+  gl.readPixels(0, 0, 1, 1, gl.RG, gl.FLOAT, resources.meterReadback);
+  return {
+    min: resources.meterReadback[0] ?? 0,
+    max: resources.meterReadback[1] ?? 0,
+  };
+}
+
 function findScopePreviewElement(nodeId: string): HTMLElement | null {
   const escaped = typeof CSS !== 'undefined' && CSS.escape
     ? CSS.escape(nodeId)
@@ -606,9 +820,37 @@ function findScopePreviewElement(nodeId: string): HTMLElement | null {
   return document.querySelector<HTMLElement>(`[data-scope-node-id="${escaped}"]`);
 }
 
+function findMeterLabelElement(nodeId: string): HTMLElement | null {
+  const escaped = typeof CSS !== 'undefined' && CSS.escape
+    ? CSS.escape(nodeId)
+    : nodeId.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  return document.querySelector<HTMLElement>(`[data-meter-node-id="${escaped}"]`);
+}
+
+function updateMeterLabelElement(element: HTMLElement, valueRange: { min: number; max: number }): void {
+  const minElement = element.querySelector<HTMLElement>('[data-meter-min]');
+  const maxElement = element.querySelector<HTMLElement>('[data-meter-max]');
+
+  if (minElement && maxElement) {
+    minElement.textContent = formatMeterValue(valueRange.min);
+    maxElement.textContent = formatMeterValue(valueRange.max);
+    return;
+  }
+
+  element.textContent = `min ${formatMeterValue(valueRange.min)}\nmax ${formatMeterValue(valueRange.max)}`;
+}
+
+function formatMeterValue(value: number): string {
+  if (!Number.isFinite(value)) return '--';
+  if (Math.abs(value) >= 10000 || (Math.abs(value) > 0 && Math.abs(value) < 0.001)) {
+    return value.toExponential(3);
+  }
+  return value.toFixed(3);
+}
+
 async function startMic(
   mediaResources: MediaResources,
-  setError: (error: string | null) => void,
+  setError: SetPreviewError,
 ): Promise<void> {
   if (mediaResources.micStream) return;
 
@@ -645,12 +887,17 @@ function stopMic(mediaResources: MediaResources): void {
   mediaResources.micSamples = null;
 }
 
-async function startCamera(
+async function ensureCamera(
   gl: WebGL2RenderingContext,
   mediaResources: MediaResources,
-  setError: (error: string | null) => void,
+  setError: SetPreviewError,
 ): Promise<void> {
-  if (mediaResources.cameraStream) return;
+  if (mediaResources.cameraRetryBlocked || mediaResources.cameraStartInFlight) return;
+  if (hasLiveCameraStream(mediaResources)) return;
+
+  releaseCameraStream(mediaResources);
+  mediaResources.cameraStartInFlight = true;
+  const requestId = ++mediaResources.cameraRequestId;
 
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
@@ -666,24 +913,69 @@ async function startCamera(
     video.srcObject = stream;
     await video.play();
 
+    if (requestId !== mediaResources.cameraRequestId) {
+      stream.getTracks().forEach((track) => track.stop());
+      video.srcObject = null;
+      return;
+    }
+
+    for (const track of stream.getVideoTracks()) {
+      track.addEventListener('ended', () => {
+        releaseCameraStream(mediaResources);
+      });
+    }
+
     mediaResources.cameraStream = stream;
     mediaResources.cameraVideo = video;
     mediaResources.cameraTexture = mediaResources.cameraTexture ?? createMediaTexture(gl);
-    setError(null);
+    clearCameraError(setError);
   } catch (caught) {
-    stopCamera(gl, mediaResources);
-    setError(`Camera unavailable: ${caught instanceof Error ? caught.message : String(caught)}`);
+    releaseCameraStream(mediaResources);
+    if (isCameraPermissionError(caught)) {
+      mediaResources.cameraRetryBlocked = true;
+      setError(`Camera unavailable: ${caught instanceof Error ? caught.message : String(caught)}`);
+    } else {
+      clearCameraError(setError);
+    }
+  } finally {
+    mediaResources.cameraStartInFlight = false;
   }
 }
 
 function stopCamera(gl: WebGL2RenderingContext, mediaResources: MediaResources): void {
-  mediaResources.cameraStream?.getTracks().forEach((track) => track.stop());
+  mediaResources.cameraRequestId += 1;
+  mediaResources.cameraStartInFlight = false;
+  mediaResources.cameraRetryBlocked = false;
+  releaseCameraStream(mediaResources);
   if (mediaResources.cameraTexture) {
     gl.deleteTexture(mediaResources.cameraTexture);
   }
+  mediaResources.cameraTexture = null;
+}
+
+function releaseCameraStream(mediaResources: MediaResources): void {
+  mediaResources.cameraStream?.getTracks().forEach((track) => track.stop());
+  if (mediaResources.cameraVideo) {
+    mediaResources.cameraVideo.pause();
+    mediaResources.cameraVideo.srcObject = null;
+  }
   mediaResources.cameraStream = null;
   mediaResources.cameraVideo = null;
-  mediaResources.cameraTexture = null;
+}
+
+function hasLiveCameraStream(mediaResources: MediaResources): boolean {
+  return mediaResources.cameraStream?.getVideoTracks().some((track) => track.readyState === 'live') ?? false;
+}
+
+function isCameraPermissionError(caught: unknown): boolean {
+  if (!(caught instanceof DOMException)) return false;
+  return caught.name === 'NotAllowedError' ||
+    caught.name === 'PermissionDeniedError' ||
+    caught.name === 'SecurityError';
+}
+
+function clearCameraError(setError: SetPreviewError): void {
+  setError((currentError) => currentError?.startsWith('Camera unavailable:') ? null : currentError);
 }
 
 function getCameraTexture(gl: WebGL2RenderingContext, mediaResources: MediaResources): WebGLTexture {
@@ -742,6 +1034,7 @@ function createStateResources(
   delaySlotCount: number,
   envelopeSlotCount: number,
   scopeSlotCount: number,
+  meterSlotCount: number,
 ): StateResources {
   if (!gl.getExtension('EXT_color_buffer_float')) {
     throw new Error('Stateful nodes need EXT_color_buffer_float, which this browser/GPU did not expose.');
@@ -750,7 +1043,7 @@ function createStateResources(
   const maxColorAttachments = gl.getParameter(gl.MAX_COLOR_ATTACHMENTS) as number;
   const maxDrawBuffers = gl.getParameter(gl.MAX_DRAW_BUFFERS) as number;
   const maxTextureUnits = gl.getParameter(gl.MAX_TEXTURE_IMAGE_UNITS) as number;
-  const stateOutputCount = feedbackTextureCount + delaySlotCount + envelopeSlotCount + scopeSlotCount;
+  const stateOutputCount = feedbackTextureCount + delaySlotCount + envelopeSlotCount + scopeSlotCount + meterSlotCount;
   const sampledStateCount = feedbackTextureCount + delaySlotCount + envelopeSlotCount;
   if (stateOutputCount + 1 > Math.min(maxColorAttachments, maxDrawBuffers)) {
     throw new Error(`This GPU can render ${Math.min(maxColorAttachments, maxDrawBuffers) - 1} state textures at once.`);
@@ -762,6 +1055,11 @@ function createStateResources(
   const framebuffer = gl.createFramebuffer();
   if (!framebuffer) {
     throw new Error('Could not create feedback framebuffer.');
+  }
+  const meterFramebuffer = gl.createFramebuffer();
+  if (!meterFramebuffer) {
+    gl.deleteFramebuffer(framebuffer);
+    throw new Error('Could not create meter framebuffer.');
   }
 
   const displayTexture = createTexture(gl, width, height, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE);
@@ -793,19 +1091,34 @@ function createStateResources(
     scopeTextures.push(createTexture(gl, width, height, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE));
   }
 
+  const meterTextures: WebGLTexture[] = [];
+  const meterReductionTextures: Array<[WebGLTexture, WebGLTexture]> = [];
+  for (let index = 0; index < meterSlotCount; index += 1) {
+    meterTextures.push(createTexture(gl, width, height, gl.R32F, gl.RED, gl.FLOAT));
+    meterReductionTextures.push([
+      createTexture(gl, width, height, gl.RG32F, gl.RG, gl.FLOAT),
+      createTexture(gl, width, height, gl.RG32F, gl.RG, gl.FLOAT),
+    ]);
+  }
+
   return {
     framebuffer,
+    meterFramebuffer,
     displayTexture,
     feedbackTextures,
     delayTextures,
     envelopeTextures,
     scopeTextures,
+    meterTextures,
+    meterReductionTextures,
+    meterReadback: new Float32Array(2),
     width,
     height,
     feedbackTextureCount,
     delaySlotCount,
     envelopeSlotCount,
     scopeSlotCount,
+    meterSlotCount,
     feedbackReadIndex: 0,
     envelopeReadIndex: 0,
     delayWriteIndex: 0,
@@ -837,6 +1150,7 @@ function createTexture(
 
 function disposeStateResources(gl: WebGL2RenderingContext, resources: StateResources): void {
   gl.deleteFramebuffer(resources.framebuffer);
+  gl.deleteFramebuffer(resources.meterFramebuffer);
   gl.deleteTexture(resources.displayTexture);
   for (const textureSet of resources.feedbackTextures) {
     for (const texture of textureSet) {
@@ -855,6 +1169,14 @@ function disposeStateResources(gl: WebGL2RenderingContext, resources: StateResou
   }
   for (const texture of resources.scopeTextures) {
     gl.deleteTexture(texture);
+  }
+  for (const texture of resources.meterTextures) {
+    gl.deleteTexture(texture);
+  }
+  for (const textureSet of resources.meterReductionTextures) {
+    for (const texture of textureSet) {
+      gl.deleteTexture(texture);
+    }
   }
 }
 
@@ -955,5 +1277,37 @@ out vec4 fragColor;
 
 void main() {
   fragColor = texture(u_texture, clamp(v_uv, 0.0, 1.0));
+}
+`;
+
+const METER_REDUCE_FRAGMENT_SHADER = `#version 300 es
+precision highp float;
+precision highp int;
+
+uniform sampler2D u_texture;
+uniform vec2 u_source_size;
+uniform int u_initial_pass;
+out vec2 fragColor;
+
+void main() {
+  ivec2 base = ivec2(gl_FragCoord.xy) * 2;
+  ivec2 sourceSize = ivec2(u_source_size);
+  float minValue = 3.402823e38;
+  float maxValue = -3.402823e38;
+
+  for (int y = 0; y < 2; y++) {
+    for (int x = 0; x < 2; x++) {
+      ivec2 coord = base + ivec2(x, y);
+      if (coord.x < sourceSize.x && coord.y < sourceSize.y) {
+        vec2 sampleRange = u_initial_pass == 1
+          ? vec2(texelFetch(u_texture, coord, 0).r)
+          : texelFetch(u_texture, coord, 0).rg;
+        minValue = min(minValue, sampleRange.x);
+        maxValue = max(maxValue, sampleRange.y);
+      }
+    }
+  }
+
+  fragColor = vec2(minValue, maxValue);
 }
 `;

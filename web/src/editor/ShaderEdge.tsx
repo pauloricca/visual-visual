@@ -1,14 +1,22 @@
 import {
   BaseEdge,
-  EdgeLabelRenderer,
   getBezierPath,
   type EdgeProps,
+  useReactFlow,
+  useViewport,
 } from '@xyflow/react';
 import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
+import { createPortal } from 'react-dom';
+import type { LinkMode } from '../graph/types';
+import { useEdgeOverlayTarget } from './EdgeOverlayContext';
 import type { ShaderFlowEdge } from './flowPatch';
 
 export function ShaderEdge(props: EdgeProps<ShaderFlowEdge>) {
   const [edgePath, labelX, labelY] = getBezierPath(props);
+  const overlayTarget = useEdgeOverlayTarget();
+  const reactFlow = useReactFlow();
+  const viewport = useViewport();
+  const screenPosition = reactFlow.flowToScreenPosition({ x: labelX, y: labelY });
   const weight = props.data?.weight ?? 1;
   const selected = props.selected ?? false;
   const edgeClassName = [
@@ -24,21 +32,55 @@ export function ShaderEdge(props: EdgeProps<ShaderFlowEdge>) {
         className={edgeClassName}
         interactionWidth={18}
       />
-      {selected ? (
-        <EdgeLabelRenderer>
+      {selected && overlayTarget ? (
+        createPortal(
           <div
             className="edge-weight-label nodrag nopan"
             style={{
-              transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
+              left: screenPosition.x,
+              top: screenPosition.y,
+              transform: `translate(-50%, -50%) scale(${viewport.zoom})`,
             }}
           >
-            <EdgeWeightScrubber
+            <EdgeLinkControls
               value={weight}
+              mode={props.data?.mode ?? 'set'}
               onChange={(nextWeight) => props.data?.onWeightChange(props.id, nextWeight)}
+              onModeChange={(nextMode) => props.data?.onModeChange(props.id, nextMode)}
             />
-          </div>
-        </EdgeLabelRenderer>
+          </div>,
+          overlayTarget,
+        )
       ) : null}
+    </>
+  );
+}
+
+interface EdgeLinkControlsProps {
+  value: number;
+  mode: LinkMode;
+  onChange: (value: number) => void;
+  onModeChange: (mode: LinkMode) => void;
+}
+
+function EdgeLinkControls({ value, mode, onChange, onModeChange }: EdgeLinkControlsProps) {
+  return (
+    <>
+      <EdgeWeightScrubber value={value} onChange={onChange} />
+      <select
+        className="edge-link-mode nodrag nopan"
+        value={mode}
+        onChange={(event) => onModeChange(event.target.value as LinkMode)}
+        onPointerDown={(event) => event.stopPropagation()}
+        onMouseDown={(event) => event.stopPropagation()}
+        onDoubleClick={(event) => event.stopPropagation()}
+        aria-label="Link mode"
+        title="Link mode"
+      >
+        <option value="set">set</option>
+        <option value="add">add</option>
+        <option value="multiply">multiply</option>
+      </select>
     </>
   );
 }
@@ -48,14 +90,16 @@ interface EdgeWeightScrubberProps {
   onChange: (value: number) => void;
 }
 
-function EdgeWeightScrubber({ value, onChange }: EdgeWeightScrubberProps) {
+export function EdgeWeightScrubber({ value, onChange }: EdgeWeightScrubberProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(formatDisplayValue(value));
   const inputRef = useRef<HTMLInputElement | null>(null);
   const dragRef = useRef<{
     pointerId: number;
-    startY: number;
-    startValue: number;
+    anchorY: number;
+    anchorValue: number;
+    currentValue: number;
+    step: number;
     dragging: boolean;
   } | null>(null);
 
@@ -79,8 +123,10 @@ function EdgeWeightScrubber({ value, onChange }: EdgeWeightScrubberProps) {
     event.stopPropagation();
     dragRef.current = {
       pointerId: event.pointerId,
-      startY: event.clientY,
-      startValue: value,
+      anchorY: event.clientY,
+      anchorValue: value,
+      currentValue: value,
+      step: scrubberStep(event),
       dragging: false,
     };
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -90,15 +136,23 @@ function EdgeWeightScrubber({ value, onChange }: EdgeWeightScrubberProps) {
     const drag = dragRef.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
 
-    const distance = drag.startY - event.clientY;
+    const distance = drag.anchorY - event.clientY;
     if (!drag.dragging && Math.abs(distance) < 3) return;
 
     drag.dragging = true;
     event.preventDefault();
     event.stopPropagation();
 
-    const step = event.metaKey ? 0.1 : event.shiftKey ? 0.001 : 0.01;
-    onChange(roundValue(drag.startValue + distance * step));
+    const step = scrubberStep(event);
+    if (step !== drag.step) {
+      drag.anchorY = event.clientY;
+      drag.anchorValue = drag.currentValue;
+      drag.step = step;
+    }
+
+    const nextValue = roundValue(drag.anchorValue + (drag.anchorY - event.clientY) * drag.step);
+    drag.currentValue = nextValue;
+    onChange(nextValue);
   }
 
   function endDrag(event: PointerEvent<HTMLDivElement>) {
@@ -184,6 +238,10 @@ function EdgeWeightScrubber({ value, onChange }: EdgeWeightScrubberProps) {
 
 function roundValue(value: number): number {
   return Math.round(value * 10000) / 10000;
+}
+
+function scrubberStep(event: { metaKey: boolean; shiftKey: boolean }): number {
+  return event.metaKey ? 0.1 : event.shiftKey ? 0.001 : 0.01;
 }
 
 function formatDisplayValue(value: number): string {

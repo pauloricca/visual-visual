@@ -10,6 +10,11 @@
   --control-size: 28px;
   --viewport-gap: var(--viewport-inset);
   --flow-controls-width: var(--control-size);
+  --z-react-flow: 1;
+  --z-edge-controls: 25;
+  --z-flow-controls: 30;
+  --z-viewport-controls: 40;
+  --z-export-panel: 50;
 }
 
 * {
@@ -79,7 +84,7 @@ select:hover {
 
 .viewport-buttons {
   position: absolute;
-  z-index: 20;
+  z-index: var(--z-viewport-controls);
   top: var(--viewport-inset);
   right: var(--viewport-inset);
   display: flex;
@@ -170,9 +175,16 @@ select:hover {
   pointer-events: none;
 }
 
+.edge-overlay-layer {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-edge-controls);
+  pointer-events: none;
+}
+
 .react-flow {
   position: relative;
-  z-index: 1;
+  z-index: var(--z-react-flow);
   background: transparent;
 }
 
@@ -192,7 +204,7 @@ select:hover {
   left: var(--viewport-inset) !important;
   bottom: var(--viewport-inset) !important;
   margin: 0 !important;
-  z-index: 30;
+  z-index: var(--z-flow-controls);
   display: flex;
   visibility: visible;
   opacity: 1;
@@ -249,7 +261,7 @@ select:hover {
 
 .shader-node {
   position: relative;
-  min-width: 168px;
+  width: max-content;
   border: 1px solid #fff;
   background: var(--surface-bg);
   color: #fff;
@@ -275,12 +287,24 @@ select:hover {
   color: #000;
 }
 
+.react-flow__node.shader-node-preview {
+  opacity: 0.48;
+  pointer-events: none;
+}
+
+.shader-node-preview .shader-node {
+  border-style: dashed;
+  background: rgba(0, 0, 0, 0.42);
+}
+
+.shader-node-preview .shader-node-title {
+  background: rgba(255, 255, 255, 0.72);
+}
+
 .shader-node-title {
   position: relative;
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  gap: 12px;
   min-height: 31px;
   padding: 4px 8px;
   border-bottom: 1px solid #fff;
@@ -290,8 +314,7 @@ select:hover {
 }
 
 .node-type-picker-button {
-  display: block;
-  min-width: 72px;
+  display: inline-block;
   height: 22px;
   padding: 0;
   overflow: hidden;
@@ -300,9 +323,11 @@ select:hover {
   color: #000;
   cursor: text;
   font-weight: 700;
+  line-height: 22px;
   text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
+  user-select: none;
 }
 
 .node-type-picker-button:hover,
@@ -312,15 +337,44 @@ select:hover {
   outline: 0;
 }
 
+.shader-node-dragging .node-type-picker-button:hover,
+.shader-node-dragging .node-type-picker-button:focus,
+.react-flow__node.dragging .node-type-picker-button:hover,
+.react-flow__node.dragging .node-type-picker-button:focus,
+.node-type-picker-button-drag-intent,
+.node-type-picker-button-drag-intent:hover,
+.node-type-picker-button-drag-intent:focus {
+  background: transparent;
+  color: #000;
+  outline: 0;
+}
+
 .node-type-picker {
-  position: relative;
+  position: absolute;
   z-index: 30;
-  min-width: 112px;
+  top: 0;
+  left: 0;
+  width: 100%;
+}
+
+.node-type-picker-open-shell {
+  position: relative;
+  display: inline-block;
+  height: 22px;
+  white-space: nowrap;
+}
+
+.node-type-picker-placeholder {
+  display: inline-block;
+  visibility: hidden;
+  height: 22px;
+  font-weight: 700;
+  line-height: 22px;
 }
 
 .node-type-picker-input {
   display: block;
-  width: 112px;
+  width: 100%;
   height: 22px;
   padding: 0 4px;
   border: 1px solid #000;
@@ -339,7 +393,9 @@ select:hover {
   position: absolute;
   top: calc(100% + 5px);
   left: 0;
-  width: 144px;
+  width: max-content;
+  min-width: 12ch;
+  max-width: 18ch;
   max-height: 220px;
   overflow: auto;
   overscroll-behavior: contain;
@@ -361,6 +417,7 @@ select:hover {
   color: #fff;
   font: inherit;
   text-align: left;
+  white-space: nowrap;
 }
 
 .node-type-picker-menu button.active,
@@ -373,53 +430,19 @@ select:hover {
   color: #777;
 }
 
-.shader-node-id,
-.shader-node-id-input {
-  overflow: hidden;
-  max-width: 80px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-weight: 400;
-}
-
-.shader-node-id {
-  display: block;
-  width: auto;
-  height: 22px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  cursor: text;
-  line-height: 22px;
-  text-align: right;
-}
-
-.shader-node-id:hover,
-.shader-node-id:focus {
-  background: rgba(0, 0, 0, 0.14);
-  color: inherit;
-  outline: 1px solid currentColor;
-  outline-offset: 1px;
-}
-
-.shader-node-id-input {
-  width: 92px;
-  height: 22px;
-  padding: 0 4px;
-  border: 1px solid #000;
-  background: #fff;
-  color: #000;
-  font: inherit;
-  text-align: right;
-}
-
 .shader-node-body {
+  position: relative;
   display: grid;
-  grid-template-columns: minmax(112px, 1fr) 64px;
+  grid-template-columns: max-content max-content;
   gap: 10px;
+  justify-content: space-between;
   min-height: 44px;
   padding: 8px;
+}
+
+.shader-node-body-no-outputs {
+  grid-template-columns: max-content;
+  justify-content: start;
 }
 
 .shader-node-body-draft {
@@ -445,6 +468,28 @@ select:hover {
   pointer-events: none;
 }
 
+.shader-node-body-meter {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-height: 42px;
+  padding: 8px;
+}
+
+.meter-label {
+  width: 100%;
+  min-width: max-content;
+  overflow: visible;
+  color: #fff;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.meter-label-row + .meter-label-row {
+  margin-top: 4px;
+}
+
 .shader-ports {
   display: flex;
   flex-direction: column;
@@ -463,7 +508,8 @@ select:hover {
 }
 
 .shader-port-input span {
-  width: 58px;
+  width: var(--input-label-width, auto);
+  max-width: 58px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -533,8 +579,16 @@ select:hover {
   left: -4px;
 }
 
+.shader-handle-meter {
+  left: -4px;
+}
+
 .shader-handle-output {
   right: -13px;
+}
+
+.shader-handle-output-title {
+  right: -4px;
 }
 
 .shader-edge .react-flow__edge-path,
@@ -554,20 +608,38 @@ select:hover {
   stroke-width: 2.5;
 }
 
+.shader-edge-preview .shader-edge-path {
+  stroke: rgba(255, 255, 255, 0.62);
+  stroke-dasharray: 5 5;
+  pointer-events: none;
+}
+
 .edge-weight-label {
-  position: absolute;
-  z-index: 40;
+  position: fixed;
+  z-index: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid #fff;
+  background: var(--surface-bg);
+  font-size: 13px;
+  font-weight: 400;
   pointer-events: all;
+  transform-origin: center;
+  --edge-control-width: 96px;
 }
 
 .edge-weight-scrubber {
-  width: 68px;
+  width: var(--edge-control-width);
   height: 22px;
   padding: 0 4px;
-  border: 1px solid #8fd7ff;
-  background: var(--surface-bg);
+  border: 1px solid #fff;
+  background: transparent;
   color: #fff;
   cursor: ns-resize;
+  font-size: 13px;
+  font-weight: 400;
   line-height: 20px;
   overflow: hidden;
   text-align: left;
@@ -577,14 +649,18 @@ select:hover {
 }
 
 .edge-weight-scrubber:focus {
-  outline: 1px solid #8fd7ff;
+  outline: 1px solid #fff;
   outline-offset: 1px;
 }
 
 .edge-weight-scrubber-editing {
   display: block;
+  border-color: #fff;
+  background: transparent;
+  color: #fff;
   cursor: text;
-  font: inherit;
+  font-size: 13px;
+  font-weight: 400;
   user-select: text;
   -moz-appearance: textfield;
 }
@@ -594,8 +670,28 @@ select:hover {
   color: #000;
 }
 
+.edge-link-mode {
+  width: var(--edge-control-width);
+  height: 22px;
+  padding: 0 4px;
+  border: 1px solid #fff;
+  border-radius: 0;
+  background: transparent;
+  color: #fff;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 20px;
+}
+
+.edge-link-mode:focus {
+  outline: 1px solid #fff;
+  outline-offset: 1px;
+}
+
 .export-panel {
   position: relative;
+  z-index: var(--z-export-panel);
   display: flex;
   min-width: 0;
   min-height: 0;

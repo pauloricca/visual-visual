@@ -1,18 +1,34 @@
-import { Handle, Position, type NodeProps } from '@xyflow/react';
-import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
+import { Handle, Position, useUpdateNodeInternals, type NodeProps } from '@xyflow/react';
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from 'react';
 import { getDefinition, NODE_TYPE_LIST } from '../graph/nodeTypes';
 import type { NodeType, PatchNode } from '../graph/types';
 import type { ShaderFlowNode, ShaderNodeData } from './flowPatch';
 
-export function ShaderNode({ data, selected }: NodeProps<ShaderFlowNode>) {
+export function ShaderNode({ data, selected, dragging }: NodeProps<ShaderFlowNode>) {
   const node = data.patchNode;
+  const updateNodeInternals = useUpdateNodeInternals();
   const definition = node.type ? getDefinition(node.type) : null;
   const isScope = node.type === 'Scope';
+  const isMeter = node.type === 'Meter';
+  const outputCount = definition?.outputs.length ?? 0;
+  const singleOutput = outputCount === 1 ? definition?.outputs[0] : null;
+  const hasBodyOutputs = outputCount > 1;
+  const inputLabelWidth = definition
+    ? `${Math.max(0, ...definition.inputs.map((input) => input.name.length))}ch`
+    : '0ch';
+  const inputStyle = { '--input-label-width': inputLabelWidth } as CSSProperties;
   const className = [
     'shader-node',
     selected ? 'shader-node-selected' : '',
+    dragging ? 'shader-node-dragging' : '',
     isScope ? 'shader-node-scope' : '',
+    isMeter ? 'shader-node-meter' : '',
   ].filter(Boolean).join(' ');
+
+  useLayoutEffect(() => {
+    const animationFrame = requestAnimationFrame(() => updateNodeInternals(node.id));
+    return () => cancelAnimationFrame(animationFrame);
+  }, [hasBodyOutputs, inputLabelWidth, node.id, outputCount, updateNodeInternals]);
 
   return (
     <div className={className}>
@@ -24,10 +40,18 @@ export function ShaderNode({ data, selected }: NodeProps<ShaderFlowNode>) {
           onClose={data.onTypeEditEnd}
           onChange={(type) => data.onTypeChange(node.id, type)}
         />
-        <NodeIdEditor
-          value={node.id}
-          onChange={(nextId) => data.onIdChange(node.id, nextId)}
-        />
+        {singleOutput ? (
+          <Handle
+            id={`out:${singleOutput.name}`}
+            type="source"
+            position={Position.Right}
+            className="shader-handle shader-handle-output shader-handle-output-title"
+            onDoubleClick={(event) => {
+              event.stopPropagation();
+              data.onPortDoubleClick(node.id, 'output', singleOutput.name);
+            }}
+          />
+        ) : null}
       </div>
       {definition && isScope ? (
         <div className="shader-node-body shader-node-body-scope">
@@ -43,9 +67,29 @@ export function ShaderNode({ data, selected }: NodeProps<ShaderFlowNode>) {
           />
           <div className="scope-preview" data-scope-node-id={node.id} />
         </div>
+      ) : definition && isMeter ? (
+        <div className="shader-node-body shader-node-body-meter">
+          <Handle
+            id="in:value"
+            type="target"
+            position={Position.Left}
+            className="shader-handle shader-handle-input shader-handle-meter"
+            onDoubleClick={(event) => {
+              event.stopPropagation();
+              data.onPortDoubleClick(node.id, 'input', 'value');
+            }}
+          />
+          <div className="meter-label" data-meter-node-id={node.id}>
+            <div className="meter-label-row">min <span data-meter-min>--</span></div>
+            <div className="meter-label-row">max <span data-meter-max>--</span></div>
+          </div>
+        </div>
       ) : definition ? (
-        <div className="shader-node-body">
-          <div className="shader-ports shader-inputs">
+        <div className={[
+          'shader-node-body',
+          !hasBodyOutputs ? 'shader-node-body-no-outputs' : '',
+        ].filter(Boolean).join(' ')}>
+          <div className="shader-ports shader-inputs" style={inputStyle}>
             {definition.inputs.map((input) => (
             <div
               className="shader-port shader-port-input"
@@ -71,35 +115,40 @@ export function ShaderNode({ data, selected }: NodeProps<ShaderFlowNode>) {
               <span>{input.name}</span>
               <NumericScrubber
                 value={node.params[input.name] ?? input.defaultValue ?? 0}
+                min={input.min}
+                max={input.max}
+                integer={input.integer}
                 onChange={(value) => data.onParamChange(node.id, input.name, value)}
               />
             </div>
             ))}
           </div>
-          <div className="shader-ports shader-outputs">
-            {definition.outputs.map((output) => (
-            <div
-              className="shader-port shader-port-output"
-              key={output.name}
-              onDoubleClick={(event) => {
-                event.stopPropagation();
-                data.onPortDoubleClick(node.id, 'output', output.name);
-              }}
-            >
-              <span>{output.name}</span>
-              <Handle
-                id={`out:${output.name}`}
-                type="source"
-                position={Position.Right}
-                className="shader-handle shader-handle-output"
+          {hasBodyOutputs ? (
+            <div className="shader-ports shader-outputs">
+              {definition.outputs.map((output) => (
+              <div
+                className="shader-port shader-port-output"
+                key={output.name}
                 onDoubleClick={(event) => {
                   event.stopPropagation();
                   data.onPortDoubleClick(node.id, 'output', output.name);
                 }}
-              />
+              >
+                <span>{output.name}</span>
+                <Handle
+                  id={`out:${output.name}`}
+                  type="source"
+                  position={Position.Right}
+                  className="shader-handle shader-handle-output"
+                  onDoubleClick={(event) => {
+                    event.stopPropagation();
+                    data.onPortDoubleClick(node.id, 'output', output.name);
+                  }}
+                />
+              </div>
+              ))}
             </div>
-            ))}
-          </div>
+          ) : null}
         </div>
       ) : (
         <div className="shader-node-body shader-node-body-draft">
@@ -131,90 +180,6 @@ export function ShaderNode({ data, selected }: NodeProps<ShaderFlowNode>) {
   );
 }
 
-interface NodeIdEditorProps {
-  value: string;
-  onChange: (nextId: string) => void;
-}
-
-function NodeIdEditor({ value, onChange }: NodeIdEditorProps) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(value);
-  const inputRef = useRef<HTMLInputElement | null>(null);
-
-  useEffect(() => {
-    if (!editing) {
-      setDraft(value);
-    }
-  }, [editing, value]);
-
-  useEffect(() => {
-    if (!editing) return;
-
-    setDraft(value);
-    const animationFrame = requestAnimationFrame(() => {
-      inputRef.current?.focus({ preventScroll: true });
-      inputRef.current?.select();
-    });
-
-    return () => cancelAnimationFrame(animationFrame);
-  }, [editing, value]);
-
-  function commit() {
-    onChange(draft);
-    setEditing(false);
-  }
-
-  function cancel() {
-    setDraft(value);
-    setEditing(false);
-  }
-
-  function handleKeyDown(event: KeyboardEvent<HTMLInputElement>) {
-    event.stopPropagation();
-    if (event.key === 'Enter') {
-      event.preventDefault();
-      commit();
-    }
-    if (event.key === 'Escape') {
-      event.preventDefault();
-      cancel();
-    }
-  }
-
-  if (editing) {
-    return (
-      <input
-        ref={inputRef}
-        className="shader-node-id-input nodrag nopan"
-        value={draft}
-        onChange={(event) => setDraft(event.target.value)}
-        onBlur={commit}
-        onKeyDown={handleKeyDown}
-        onPointerDown={(event) => event.stopPropagation()}
-        onMouseDown={(event) => event.stopPropagation()}
-        onDoubleClick={(event) => event.stopPropagation()}
-        spellCheck={false}
-      />
-    );
-  }
-
-  return (
-    <button
-      className="shader-node-id nodrag nopan"
-      type="button"
-      onClick={(event) => {
-        event.stopPropagation();
-        setEditing(true);
-      }}
-      onMouseDown={(event) => event.stopPropagation()}
-      onDoubleClick={(event) => event.stopPropagation()}
-      title={value}
-    >
-      {value}
-    </button>
-  );
-}
-
 interface NodeTypePickerProps {
   nodeType: NodeType | null;
   open: boolean;
@@ -226,8 +191,10 @@ interface NodeTypePickerProps {
 function NodeTypePicker({ nodeType, open, onOpen, onClose, onChange }: NodeTypePickerProps) {
   const [query, setQuery] = useState<string>(nodeType ?? '');
   const [highlightedIndex, setHighlightedIndex] = useState(0);
+  const [dragIntent, setDragIntent] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const pointerStartRef = useRef<{ x: number; y: number } | null>(null);
   const options = NODE_TYPE_LIST.filter((type) =>
     type.toLowerCase().includes(query.trim().toLowerCase()),
   );
@@ -295,14 +262,43 @@ function NodeTypePicker({ nodeType, open, onOpen, onClose, onChange }: NodeTypeP
   if (!open) {
     return (
       <button
-        className="node-type-picker-button nodrag nopan"
+        className={dragIntent ? 'node-type-picker-button node-type-picker-button-drag-intent' : 'node-type-picker-button'}
         type="button"
+        onPointerDown={(event) => {
+          pointerStartRef.current = { x: event.clientX, y: event.clientY };
+          setDragIntent(false);
+        }}
+        onPointerMove={(event) => {
+          const pointerStart = pointerStartRef.current;
+          if (!pointerStart) return;
+
+          const moved = Math.hypot(event.clientX - pointerStart.x, event.clientY - pointerStart.y) > 4;
+          if (!moved) return;
+
+          setDragIntent(true);
+          event.currentTarget.blur();
+        }}
+        onPointerUp={() => {
+          window.setTimeout(() => setDragIntent(false), 0);
+        }}
+        onPointerCancel={() => {
+          pointerStartRef.current = null;
+          setDragIntent(false);
+        }}
         onClick={(event) => {
+          const pointerStart = pointerStartRef.current;
+          pointerStartRef.current = null;
+          const moved = pointerStart
+            ? Math.hypot(event.clientX - pointerStart.x, event.clientY - pointerStart.y) > 4
+            : false;
+          if (moved) {
+            event.currentTarget.blur();
+            return;
+          }
+
           event.stopPropagation();
           onOpen();
         }}
-        onMouseDown={(event) => event.stopPropagation()}
-        onDoubleClick={(event) => event.stopPropagation()}
       >
         {nodeType ?? 'type'}
       </button>
@@ -310,67 +306,75 @@ function NodeTypePicker({ nodeType, open, onOpen, onClose, onChange }: NodeTypeP
   }
 
   return (
-    <div className="node-type-picker nodrag nopan nowheel" onMouseDown={(event) => event.stopPropagation()}>
-      <input
-        ref={inputRef}
-        className="node-type-picker-input"
-        autoFocus
-        value={query}
-        onChange={(event) => {
-          setQuery(event.target.value);
-          setHighlightedIndex(0);
-        }}
-        onBlur={onClose}
-        onFocus={(event) => event.currentTarget.select()}
-        onKeyDown={handleKeyDown}
-        onPointerDown={(event) => event.stopPropagation()}
-        onDoubleClick={(event) => event.stopPropagation()}
-        spellCheck={false}
-      />
-      <div
-        className="node-type-picker-menu nowheel"
-        onMouseDown={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-        }}
-        onWheel={(event) => event.stopPropagation()}
-      >
-        {options.map((type, index) => (
-          <button
-            className={index === highlightedIndex ? 'active' : ''}
-            key={type}
-            ref={(element) => {
-              optionRefs.current[index] = element;
-            }}
-            type="button"
-            onMouseDown={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              choose(type);
-            }}
-          >
-            {type}
-          </button>
-        ))}
-        {options.length === 0 ? <div className="node-type-picker-empty">no match</div> : null}
+    <span className="node-type-picker-open-shell">
+      <span className="node-type-picker-placeholder" aria-hidden="true">{nodeType ?? 'type'}</span>
+      <div className="node-type-picker nodrag nopan nowheel" onMouseDown={(event) => event.stopPropagation()}>
+        <input
+          ref={inputRef}
+          className="node-type-picker-input"
+          autoFocus
+          value={query}
+          onChange={(event) => {
+            setQuery(event.target.value);
+            setHighlightedIndex(0);
+          }}
+          onBlur={onClose}
+          onFocus={(event) => event.currentTarget.select()}
+          onKeyDown={handleKeyDown}
+          onPointerDown={(event) => event.stopPropagation()}
+          onDoubleClick={(event) => event.stopPropagation()}
+          spellCheck={false}
+        />
+        <div
+          className="node-type-picker-menu nowheel"
+          onMouseDown={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          }}
+          onWheel={(event) => event.stopPropagation()}
+        >
+          {options.map((type, index) => (
+            <button
+              className={index === highlightedIndex ? 'active' : ''}
+              key={type}
+              ref={(element) => {
+                optionRefs.current[index] = element;
+              }}
+              type="button"
+              onMouseDown={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                choose(type);
+              }}
+            >
+              {type}
+            </button>
+          ))}
+          {options.length === 0 ? <div className="node-type-picker-empty">no match</div> : null}
+        </div>
       </div>
-    </div>
+    </span>
   );
 }
 
 interface NumericScrubberProps {
   value: number;
+  min?: number;
+  max?: number;
+  integer?: boolean;
   onChange: (value: number) => void;
 }
 
-function NumericScrubber({ value, onChange }: NumericScrubberProps) {
+function NumericScrubber({ value, min, max, integer = false, onChange }: NumericScrubberProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(formatDisplayValue(value));
   const inputRef = useRef<HTMLInputElement | null>(null);
   const dragRef = useRef<{
     pointerId: number;
-    startY: number;
-    startValue: number;
+    anchorY: number;
+    anchorValue: number;
+    currentValue: number;
+    step: number;
     dragging: boolean;
   } | null>(null);
 
@@ -394,8 +398,10 @@ function NumericScrubber({ value, onChange }: NumericScrubberProps) {
     event.stopPropagation();
     dragRef.current = {
       pointerId: event.pointerId,
-      startY: event.clientY,
-      startValue: value,
+      anchorY: event.clientY,
+      anchorValue: value,
+      currentValue: value,
+      step: scrubberStep(event),
       dragging: false,
     };
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -405,15 +411,28 @@ function NumericScrubber({ value, onChange }: NumericScrubberProps) {
     const drag = dragRef.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
 
-    const distance = drag.startY - event.clientY;
+    const distance = drag.anchorY - event.clientY;
     if (!drag.dragging && Math.abs(distance) < 3) return;
 
     drag.dragging = true;
     event.preventDefault();
     event.stopPropagation();
 
-    const step = event.metaKey ? 0.1 : event.shiftKey ? 0.001 : 0.01;
-    onChange(roundValue(drag.startValue + distance * step));
+    const step = scrubberStep(event);
+    if (step !== drag.step) {
+      drag.anchorY = event.clientY;
+      drag.anchorValue = drag.currentValue;
+      drag.step = step;
+    }
+
+    const nextValue = constrainValue(
+      roundValue(drag.anchorValue + (drag.anchorY - event.clientY) * drag.step),
+      min,
+      max,
+      integer,
+    );
+    drag.currentValue = nextValue;
+    onChange(nextValue);
   }
 
   function endDrag(event: PointerEvent<HTMLDivElement>) {
@@ -432,7 +451,7 @@ function NumericScrubber({ value, onChange }: NumericScrubberProps) {
   function commitDraft() {
     const nextValue = Number(draft.trim());
     if (Number.isFinite(nextValue)) {
-      onChange(nextValue);
+      onChange(constrainValue(nextValue, min, max, integer));
     } else {
       setDraft(formatDisplayValue(value));
     }
@@ -459,8 +478,11 @@ function NumericScrubber({ value, onChange }: NumericScrubberProps) {
       <input
         ref={inputRef}
         className="numeric-scrubber numeric-scrubber-editing nodrag nopan"
-        type="text"
+        type="number"
         inputMode="decimal"
+        min={min}
+        max={max}
+        step={integer ? 1 : undefined}
         value={draft}
         onChange={(event) => setDraft(event.target.value)}
         onBlur={commitDraft}
@@ -479,6 +501,8 @@ function NumericScrubber({ value, onChange }: NumericScrubberProps) {
       role="spinbutton"
       tabIndex={0}
       aria-valuenow={value}
+      aria-valuemin={min}
+      aria-valuemax={max}
       onPointerDown={startDrag}
       onPointerMove={updateDrag}
       onPointerUp={endDrag}
@@ -499,6 +523,15 @@ function NumericScrubber({ value, onChange }: NumericScrubberProps) {
 
 function roundValue(value: number): number {
   return Math.round(value * 10000) / 10000;
+}
+
+function scrubberStep(event: { metaKey: boolean; shiftKey: boolean }): number {
+  return event.metaKey ? 0.1 : event.shiftKey ? 0.001 : 0.01;
+}
+
+function constrainValue(value: number, min?: number, max?: number, integer = false): number {
+  const rounded = integer ? Math.round(value) : value;
+  return Math.min(Math.max(rounded, min ?? -Infinity), max ?? Infinity);
 }
 
 function formatDisplayValue(value: number): string {

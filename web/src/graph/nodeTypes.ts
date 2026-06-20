@@ -19,7 +19,11 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
       { name: 'g', defaultValue: 0 },
       { name: 'b', defaultValue: 0 },
     ],
-    outputs: [],
+    outputs: [
+      { name: 'r' },
+      { name: 'g' },
+      { name: 'b' },
+    ],
   },
   Constant: {
     type: 'Constant',
@@ -42,17 +46,17 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
   Step: {
     type: 'Step',
     inputs: [
-      { name: 'edge', defaultValue: 0.5 },
       { name: 'value', defaultValue: 0 },
+      { name: 'edge', defaultValue: 0.5 },
     ],
     outputs: [{ name: 'value' }],
   },
   Smoothstep: {
     type: 'Smoothstep',
     inputs: [
+      { name: 'value', defaultValue: 0 },
       { name: 'edge0', defaultValue: 0 },
       { name: 'edge1', defaultValue: 1 },
-      { name: 'value', defaultValue: 0 },
     ],
     outputs: [{ name: 'value' }],
   },
@@ -62,6 +66,17 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
       { name: 'a', defaultValue: 0 },
       { name: 'b', defaultValue: 1 },
       { name: 'amount', defaultValue: 0.5 },
+    ],
+    outputs: [{ name: 'value' }],
+  },
+  Map: {
+    type: 'Map',
+    inputs: [
+      { name: 'value', defaultValue: 0 },
+      { name: 'srcMin', defaultValue: 0 },
+      { name: 'srcMax', defaultValue: 1 },
+      { name: 'trgtMin', defaultValue: 0 },
+      { name: 'trgtMax', defaultValue: 1 },
     ],
     outputs: [{ name: 'value' }],
   },
@@ -117,7 +132,8 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
     inputs: [
       { name: 'value', defaultValue: 0 },
       { name: 'gate', defaultValue: 0 },
-      { name: 'threshold', defaultValue: 0.5 },
+      { name: 'min', defaultValue: 0.5 },
+      { name: 'max', defaultValue: 1 },
     ],
     outputs: [{ name: 'value' }],
   },
@@ -158,6 +174,31 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
       { name: 'y', defaultValue: 0 },
       { name: 'scale', defaultValue: 12 },
       { name: 'seed', defaultValue: 0 },
+      { name: 'octaves', defaultValue: 4, min: 1, max: 4, integer: true },
+    ],
+    outputs: [{ name: 'value' }],
+  },
+  Noise3: {
+    type: 'Noise3',
+    inputs: [
+      { name: 'x', defaultValue: 0 },
+      { name: 'y', defaultValue: 0 },
+      { name: 'z', defaultValue: 0 },
+      { name: 'scale', defaultValue: 12 },
+      { name: 'seed', defaultValue: 0 },
+      { name: 'octaves', defaultValue: 4, min: 1, max: 4, integer: true },
+    ],
+    outputs: [{ name: 'value' }],
+  },
+  Noise3Fast: {
+    type: 'Noise3Fast',
+    inputs: [
+      { name: 'x', defaultValue: 0 },
+      { name: 'y', defaultValue: 0 },
+      { name: 'z', defaultValue: 0 },
+      { name: 'scale', defaultValue: 12 },
+      { name: 'seed', defaultValue: 0 },
+      { name: 'octaves', defaultValue: 3, min: 1, max: 4, integer: true },
     ],
     outputs: [{ name: 'value' }],
   },
@@ -165,7 +206,7 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
     type: 'Delay',
     inputs: [
       { name: 'value', defaultValue: 0 },
-      { name: 'frames', defaultValue: 1, connectable: false },
+      { name: 'frames', defaultValue: 1, connectable: false, min: 1, max: 32, integer: true },
     ],
     outputs: [{ name: 'value' }],
   },
@@ -180,6 +221,11 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
   },
   Scope: {
     type: 'Scope',
+    inputs: [{ name: 'value', defaultValue: 0 }],
+    outputs: [],
+  },
+  Meter: {
+    type: 'Meter',
     inputs: [{ name: 'value', defaultValue: 0 }],
     outputs: [],
   },
