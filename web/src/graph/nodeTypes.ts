@@ -234,6 +234,15 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
     ],
     outputs: [{ name: 'value' }],
   },
+  midiCC: {
+    type: 'midiCC',
+    inputs: [
+      { name: 'cc', defaultValue: 1, connectable: false, min: 0, max: 127, integer: true },
+      { name: 'channel', defaultValue: 1, connectable: false, min: 1, max: 16, integer: true },
+      { name: 'value', defaultValue: 0, connectable: false, min: 0, max: 1 },
+    ],
+    outputs: [{ name: 'value' }],
+  },
   Envelope: {
     type: 'Envelope',
     inputs: [
@@ -288,6 +297,7 @@ const NODE_TYPE_LABELS: Partial<Record<NodeType, string>> = {
   Group: 'Group',
   Ins: 'Ins',
   Outs: 'Outs',
+  midiCC: 'MIDI CC',
 };
 
 export const NODE_TYPE_LIST = Object.keys(NODE_DEFINITIONS) as NodeType[];

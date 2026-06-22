@@ -46,6 +46,8 @@ import { WebGLPreview, type WebGLPreviewHandle } from './WebGLPreview';
 const nodeTypes = { shaderNode: ShaderNode };
 const edgeTypes = { shaderEdge: ShaderEdge };
 const STORAGE_KEY = 'visual-visual.editor-state.v1';
+const MIDI_CC_STORAGE_KEY = 'visual-visual.midi-cc-values.v1';
+const MIDI_CC_PERSIST_DELAY_MS = 120;
 const HISTORY_LIMIT = 100;
 const DRAFT_NODE_PREVIEW_ID = '__draft_node_preview__';
 const DUPLICATE_NODE_PREVIEW_PREFIX = '__duplicate_node_preview__:';
@@ -53,9 +55,11 @@ const PASTE_OFFSET = { x: 36, y: 36 };
 const DRAFT_NODE_WIDTH = 168;
 const DRAFT_NODE_HANDLE_X_OFFSET = 13;
 const DRAFT_NODE_FIRST_PORT_Y = 52;
+let subpatchCloneSequence = 0;
 
 type GraphSnapshot = Pick<PersistedEditorState, 'nodes' | 'edges'>;
 type HistoryState = { past: GraphSnapshot[]; future: GraphSnapshot[] };
+type MidiCcValueMap = Map<string, number>;
 
 interface DraftNodeConnection {
   originNodeId: string;
@@ -65,10 +69,20 @@ interface DraftNodeConnection {
   modifierActive: boolean;
 }
 
+interface BoundaryPortSelection {
+  nodeId: string;
+  side: 'input' | 'output';
+  port: string;
+}
+
 interface CopiedGraph {
   nodes: ShaderFlowNode[];
   edges: ShaderFlowEdge[];
   boundaryEdges: ShaderFlowEdge[];
+}
+
+interface DuplicateGraphResult extends CopiedGraph {
+  sourceSubpatchCloneIds: Record<string, string>;
 }
 
 interface CopiedGraphClipboardPayload {
@@ -152,6 +166,7 @@ function NodeEditorInner() {
   const copiedGraphRef = useRef<CopiedGraph | null>(null);
   const pasteCountRef = useRef(0);
   const draftNodeConnectionRef = useRef<DraftNodeConnection | null>(null);
+  const pendingBoundaryPortRef = useRef<BoundaryPortSelection | null>(null);
   const duplicateDragRef = useRef<DuplicateDragState | null>(null);
   const historyGroupRef = useRef<{ key: string; time: number } | null>(null);
   const nodeDragHistoryRef = useRef(false);
@@ -161,10 +176,14 @@ function NodeEditorInner() {
   });
   const [editingStack, setEditingStack] = useState<SubpatchEditFrame[]>([]);
   const [draftNodeConnection, setDraftNodeConnection] = useState<DraftNodeConnection | null>(null);
+  const [pendingBoundaryPort, setPendingBoundaryPort] = useState<BoundaryPortSelection | null>(null);
+  const [selectedBoundaryPort, setSelectedBoundaryPort] = useState<BoundaryPortSelection | null>(null);
   const [duplicateDrag, setDuplicateDrag] = useState<DuplicateDragState | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const editorShellRef = useRef<HTMLElement | null>(null);
   const previewRef = useRef<WebGLPreviewHandle | null>(null);
+  const midiCcValuesRef = useRef<MidiCcValueMap>(loadMidiCcValues());
+  const midiCcPersistTimeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
     nodesRef.current = nodes;
@@ -194,6 +213,10 @@ function NodeEditorInner() {
     });
   }, []);
 
+  useEffect(() => {
+    pendingBoundaryPortRef.current = pendingBoundaryPort;
+  }, [pendingBoundaryPort]);
+
   const commitHistory = useCallback((groupKey?: string) => {
     const now = Date.now();
     const lastGroup = historyGroupRef.current;
@@ -219,10 +242,121 @@ function NodeEditorInner() {
     historyGroupRef.current = groupKey ? { key: groupKey, time: now } : null;
   }, []);
 
+  const persistMidiCcValues = useCallback(() => {
+    saveMidiCcValues(midiCcValuesRef.current);
+  }, []);
+
+  const schedulePersistMidiCcValues = useCallback(() => {
+    if (midiCcPersistTimeoutRef.current !== null) return;
+
+    midiCcPersistTimeoutRef.current = window.setTimeout(() => {
+      midiCcPersistTimeoutRef.current = null;
+      persistMidiCcValues();
+    }, MIDI_CC_PERSIST_DELAY_MS);
+  }, [persistMidiCcValues]);
+
+  const syncGraphMidiCcValues = useCallback(() => {
+    const values = midiCcValuesRef.current;
+    setNodes((current) => syncNodesWithMidiCcValues(current, values));
+    setEditingStack((current) => syncEditingStackMidiCcValues(current, values));
+  }, []);
+
+  const updateMidiCcValue = useCallback((channel: number, cc: number, value: number) => {
+    const normalizedChannel = normalizeMidiChannel(channel);
+    const normalizedCc = normalizeMidiCc(cc);
+    const normalizedValue = normalizeMidiValue(value);
+    const key = midiCcKey(normalizedChannel, normalizedCc);
+    const previousValue = midiCcValuesRef.current.get(key);
+    if (previousValue !== undefined && Math.abs(previousValue - normalizedValue) < 0.000001) {
+      return;
+    }
+
+    midiCcValuesRef.current.set(key, normalizedValue);
+    schedulePersistMidiCcValues();
+    syncGraphMidiCcValues();
+  }, [schedulePersistMidiCcValues, syncGraphMidiCcValues]);
+
+  useEffect(() => {
+    syncGraphMidiCcValues();
+  }, [editingStack, nodes, syncGraphMidiCcValues]);
+
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || typeof navigator.requestMIDIAccess !== 'function') {
+      return;
+    }
+
+    let disposed = false;
+    let access: MIDIAccess | null = null;
+    let stateListener: ((event: Event) => void) | null = null;
+    const attachedInputs = new Set<MIDIInput>();
+
+    const handleMidiMessage = (event: MIDIMessageEvent) => {
+      const data = event.data;
+      if (!data || data.length < 3) return;
+
+      const status = data[0] & 0xf0;
+      if (status !== 0xb0) return;
+
+      const channel = (data[0] & 0x0f) + 1;
+      const cc = data[1];
+      const value = data[2] / 127;
+      updateMidiCcValue(channel, cc, value);
+    };
+
+    const detachInputs = () => {
+      for (const input of attachedInputs) {
+        if (input.onmidimessage === handleMidiMessage) {
+          input.onmidimessage = null;
+        }
+      }
+      attachedInputs.clear();
+    };
+
+    const attachInputs = (midiAccess: MIDIAccess) => {
+      detachInputs();
+      for (const input of midiAccess.inputs.values()) {
+        input.onmidimessage = handleMidiMessage;
+        attachedInputs.add(input);
+      }
+    };
+
+    void navigator.requestMIDIAccess().then((midiAccess) => {
+      if (disposed) return;
+
+      access = midiAccess;
+      attachInputs(midiAccess);
+      stateListener = () => {
+        if (!access) return;
+        attachInputs(access);
+      };
+      midiAccess.addEventListener('statechange', stateListener);
+    }).catch(() => {
+      // MIDI permissions can be denied or unsupported by the host browser.
+    });
+
+    return () => {
+      disposed = true;
+      detachInputs();
+      if (access && stateListener) {
+        access.removeEventListener('statechange', stateListener);
+      }
+    };
+  }, [updateMidiCcValue]);
+
+  useEffect(() => {
+    return () => {
+      if (midiCcPersistTimeoutRef.current !== null) {
+        window.clearTimeout(midiCcPersistTimeoutRef.current);
+        midiCcPersistTimeoutRef.current = null;
+      }
+      persistMidiCcValues();
+    };
+  }, [persistMidiCcValues]);
+
   const updateNodeParam = useCallback((nodeId: string, port: string, value: number) => {
     commitHistory(`param:${nodeId}:${port}`);
     setNodes((current) =>
-      current.map((node) =>
+      syncNodesWithMidiCcValues(current.map((node) =>
         node.id === nodeId
           ? {
               ...node,
@@ -235,7 +369,7 @@ function NodeEditorInner() {
               },
             }
           : node,
-      ),
+      ), midiCcValuesRef.current),
     );
   }, [commitHistory]);
 
@@ -332,6 +466,10 @@ function NodeEditorInner() {
           }
         }
 
+        const nextNodeParams = type === 'midiCC'
+          ? syncMidiCcParams(nextParams, midiCcValuesRef.current)
+          : nextParams;
+
         return {
           ...node,
           id: nextId,
@@ -341,15 +479,19 @@ function NodeEditorInner() {
               ...node.data.patchNode,
               id: nextId,
               type,
-              params: nextParams,
+              params: nextNodeParams,
               ...(type === 'Group' ? {
                 inputs: node.data.patchNode.inputs,
                 outputs: node.data.patchNode.outputs,
                 subpatch: node.data.patchNode.subpatch,
+                subpatchName: node.data.patchNode.subpatchName ?? node.id,
+                subpatchCloneId: node.data.patchNode.subpatchCloneId ?? makeSubpatchCloneId(node.id),
               } : {
                 inputs: undefined,
                 outputs: undefined,
                 subpatch: undefined,
+                subpatchName: undefined,
+                subpatchCloneId: undefined,
               }),
             },
           },
@@ -591,11 +733,128 @@ function NodeEditorInner() {
     setEditingTypeNodeId(id);
   }, [commitHistory, reactFlow, updateNodeId, updateNodeParam, updateNodeType]);
 
+  const materializePendingBoundaryPort = useCallback((pending: BoundaryPortSelection): void => {
+    const relatedNode = nodesRef.current.find((node) => node.id === pending.nodeId);
+    if (!relatedNode || !canRenameBoundaryPort(relatedNode.data.patchNode as PatchNode, pending.side)) return;
+
+    setNodes((current) => current.map((node) => {
+      if (node.id !== pending.nodeId) return node;
+
+      const currentInputs = node.data.patchNode.inputs ?? [];
+      const currentOutputs = node.data.patchNode.outputs ?? [];
+      const inputExists = currentInputs.some((port) => port.name === pending.port);
+      const outputExists = currentOutputs.some((port) => port.name === pending.port);
+      if ((pending.side === 'input' && inputExists) || (pending.side === 'output' && outputExists)) {
+        return node;
+      }
+
+      const nextInputs = pending.side === 'input'
+        ? [...currentInputs.map((port) => ({ ...port })), { name: pending.port, defaultValue: 0 }]
+        : currentInputs;
+      const nextOutputs = pending.side === 'output'
+        ? [...currentOutputs.map((port) => ({ ...port })), { name: pending.port }]
+        : currentOutputs;
+      const nextParams = pending.side === 'input'
+        ? { ...node.data.patchNode.params, [pending.port]: 0 }
+        : node.data.patchNode.params;
+
+      return {
+        ...node,
+        data: {
+          ...node.data,
+          patchNode: {
+            ...node.data.patchNode,
+            params: nextParams,
+            ...(node.data.patchNode.inputs !== undefined || pending.side === 'input' ? { inputs: nextInputs } : {}),
+            ...(node.data.patchNode.outputs !== undefined || pending.side === 'output' ? { outputs: nextOutputs } : {}),
+          },
+        },
+      };
+    }));
+
+    const frame = editingStack[editingStack.length - 1];
+    if (!frame) return;
+
+    setEditingStack((current) => current.map((entry, index) => {
+      if (index !== current.length - 1) return entry;
+
+      return {
+        ...entry,
+        parentNodes: entry.parentNodes.map((node) => {
+          if (node.id !== entry.groupId) return node;
+
+          const existingInputs = node.data.patchNode.inputs ?? [];
+          const existingOutputs = node.data.patchNode.outputs ?? [];
+
+          if (relatedNode.data.patchNode.type === 'Ins' && pending.side === 'output') {
+            if (existingInputs.some((port) => port.name === pending.port)) return node;
+            return {
+              ...node,
+              data: {
+                ...node.data,
+                patchNode: {
+                  ...node.data.patchNode,
+                  params: { ...node.data.patchNode.params, [pending.port]: 0 },
+                  inputs: [...existingInputs.map((port) => ({ ...port })), { name: pending.port, defaultValue: 0 }],
+                },
+              },
+            };
+          }
+
+          if (relatedNode.data.patchNode.type === 'Outs' && pending.side === 'input') {
+            if (existingOutputs.some((port) => port.name === pending.port)) return node;
+            return {
+              ...node,
+              data: {
+                ...node.data,
+                patchNode: {
+                  ...node.data.patchNode,
+                  outputs: [...existingOutputs.map((port) => ({ ...port })), { name: pending.port }],
+                },
+              },
+            };
+          }
+
+          return node;
+        }),
+      };
+    }));
+  }, [editingStack]);
+
   const onConnectStart = useCallback((event: globalThis.MouseEvent | TouchEvent, params: OnConnectStartParams) => {
     const pointer = clientPointFromEvent(event);
     if (!pointer || !params.nodeId || !params.handleId || !params.handleType) {
       updateDraftNodeConnection(null);
+      setPendingBoundaryPort(null);
       return;
+    }
+
+    if (editingStack.length > 0) {
+      const insNode = nodesRef.current.find((node) => node.data.patchNode.type === 'Ins');
+      const outsNode = nodesRef.current.find((node) => node.data.patchNode.type === 'Outs');
+      let nextPending: BoundaryPortSelection | null = null;
+
+      if (params.handleType === 'target' && insNode && params.nodeId !== insNode.id) {
+        const usedNames = new Set((insNode.data.patchNode.outputs ?? []).map((port) => port.name));
+        nextPending = {
+          nodeId: insNode.id,
+          side: 'output',
+          port: uniquePortName('new_input', usedNames),
+        };
+      }
+
+      if (params.handleType === 'source' && outsNode && params.nodeId !== outsNode.id) {
+        const usedNames = new Set((outsNode.data.patchNode.inputs ?? []).map((port) => port.name));
+        nextPending = {
+          nodeId: outsNode.id,
+          side: 'input',
+          port: uniquePortName('new_output', usedNames),
+        };
+      }
+
+      setPendingBoundaryPort(nextPending);
+    } else {
+      setPendingBoundaryPort(null);
     }
 
     updateDraftNodeConnection({
@@ -605,7 +864,7 @@ function NodeEditorInner() {
       pointer,
       modifierActive: isCommandModifierPressed(event),
     });
-  }, [updateDraftNodeConnection]);
+  }, [editingStack.length, updateDraftNodeConnection]);
 
   const onConnectEnd = useCallback<OnConnectEnd>((event, connectionState) => {
     const pointer = clientPointFromEvent(event);
@@ -620,6 +879,7 @@ function NodeEditorInner() {
     if (!connectionState.toHandle || connectionState.toHandle.nodeId === DRAFT_NODE_PREVIEW_ID) {
       createDraftNodeFromConnection();
     }
+    setPendingBoundaryPort(null);
     updateDraftNodeConnection(null);
   }, [createDraftNodeFromConnection, updateDraftNodeConnection]);
 
@@ -683,7 +943,8 @@ function NodeEditorInner() {
     pasteCountRef.current += 1;
     commitHistory();
     setNodes((current) => [
-      ...current.map((node) => ({ ...node, selected: false })),
+      ...applySourceSubpatchCloneIds(current, duplicatedGraph.sourceSubpatchCloneIds)
+        .map((node) => ({ ...node, selected: false })),
       ...duplicatedGraph.nodes.map((node) => ({ ...node, selected: true })),
     ]);
     setEdges((current) => dedupeEdges([
@@ -733,7 +994,7 @@ function NodeEditorInner() {
       null,
     ));
     setEdges(toFlowEdges(subpatch, updateEdgeWeight, insertNodeOnEdge));
-    setPatchName(node.id);
+    setPatchName(patchNode.subpatchName ?? node.id);
     setEditingTypeNodeId(null);
     copiedGraphRef.current = null;
     pasteCountRef.current = 0;
@@ -843,7 +1104,10 @@ function NodeEditorInner() {
 
       commitHistory();
       setNodes((current) => [
-        ...restoreGraphNodePositions(current, dragState.nodes).map((node) => ({ ...node, selected: false })),
+        ...applySourceSubpatchCloneIds(
+          restoreGraphNodePositions(current, dragState.nodes),
+          duplicatedGraph.sourceSubpatchCloneIds,
+        ).map((node) => ({ ...node, selected: false })),
         ...duplicatedGraph.nodes.map((node) => ({ ...node, selected: true })),
       ]);
       setEdges((current) => dedupeEdges([
@@ -871,10 +1135,30 @@ function NodeEditorInner() {
           onPortDoubleClick: insertNodeOnPort,
           onPortNameChange: updateBoundaryPortName,
           onPortMove: updateBoundaryPortOrder,
+          onPortSelect: (nodeId: string, side: 'input' | 'output', port: string) => {
+            setSelectedBoundaryPort({ nodeId, side, port });
+          },
+          selectedPort: selectedBoundaryPort && selectedBoundaryPort.nodeId === node.id
+            ? { side: selectedBoundaryPort.side, name: selectedBoundaryPort.port }
+            : null,
+          previewPort: pendingBoundaryPort && pendingBoundaryPort.nodeId === node.id
+            ? { side: pendingBoundaryPort.side, name: pendingBoundaryPort.port }
+            : null,
           isTypePickerOpen: editingTypeNodeId === node.id,
         },
       })),
-    [editingTypeNodeId, insertNodeOnPort, nodes, updateBoundaryPortName, updateBoundaryPortOrder, updateNodeId, updateNodeParam, updateNodeType],
+    [
+      editingTypeNodeId,
+      insertNodeOnPort,
+      nodes,
+      pendingBoundaryPort,
+      selectedBoundaryPort,
+      updateBoundaryPortName,
+      updateBoundaryPortOrder,
+      updateNodeId,
+      updateNodeParam,
+      updateNodeType,
+    ],
   );
 
   const edgesWithCallbacks = useMemo(
@@ -1191,7 +1475,22 @@ function NodeEditorInner() {
 
   const onConnect = useCallback((connection: Connection) => {
     if (connection.source === DRAFT_NODE_PREVIEW_ID || connection.target === DRAFT_NODE_PREVIEW_ID) {
+      setPendingBoundaryPort(null);
       return;
+    }
+
+    const pending = pendingBoundaryPortRef.current;
+    if (pending) {
+      const isPendingSource = pending.side === 'output'
+        && connection.source === pending.nodeId
+        && connection.sourceHandle === `out:${pending.port}`;
+      const isPendingTarget = pending.side === 'input'
+        && connection.target === pending.nodeId
+        && connection.targetHandle === `in:${pending.port}`;
+
+      if (isPendingSource || isPendingTarget) {
+        materializePendingBoundaryPort(pending);
+      }
     }
 
     const candidate: ShaderFlowEdge = {
@@ -1211,7 +1510,10 @@ function NodeEditorInner() {
       className: 'shader-edge',
     };
     const link = linkFromEdge(candidate);
-    if (!link) return;
+    if (!link) {
+      setPendingBoundaryPort(null);
+      return;
+    }
 
     const alreadyConnected = edges.some((edge) => {
       const existing = linkFromEdge(edge);
@@ -1223,7 +1525,10 @@ function NodeEditorInner() {
         existing.to.port === link.to.port
       );
     });
-    if (alreadyConnected) return;
+    if (alreadyConnected) {
+      setPendingBoundaryPort(null);
+      return;
+    }
 
     commitHistory();
     setEdges((current) => {
@@ -1246,7 +1551,123 @@ function NodeEditorInner() {
         current,
       );
     });
-  }, [commitHistory, edges, insertNodeOnEdge, updateEdgeMode, updateEdgeWeight]);
+    setPendingBoundaryPort(null);
+  }, [commitHistory, edges, insertNodeOnEdge, materializePendingBoundaryPort, updateEdgeMode, updateEdgeWeight]);
+
+  const deleteSelectedBoundaryPort = useCallback(() => {
+    const selected = selectedBoundaryPort;
+    if (!selected) return false;
+
+    const relatedNode = nodesRef.current.find((node) => node.id === selected.nodeId);
+    if (!relatedNode || !canRenameBoundaryPort(relatedNode.data.patchNode as PatchNode, selected.side)) return false;
+
+    commitHistory();
+    setNodes((current) => current.map((node) => {
+      if (node.id !== selected.nodeId) return node;
+
+      const nextInputs = selected.side === 'input'
+        ? (node.data.patchNode.inputs ?? []).filter((port) => port.name !== selected.port)
+        : node.data.patchNode.inputs;
+      const nextOutputs = selected.side === 'output'
+        ? (node.data.patchNode.outputs ?? []).filter((port) => port.name !== selected.port)
+        : node.data.patchNode.outputs;
+      const nextParams = selected.side === 'input'
+        ? Object.fromEntries(Object.entries(node.data.patchNode.params).filter(([key]) => key !== selected.port))
+        : node.data.patchNode.params;
+
+      return {
+        ...node,
+        data: {
+          ...node.data,
+          patchNode: {
+            ...node.data.patchNode,
+            params: nextParams,
+            ...(nextInputs ? { inputs: nextInputs } : {}),
+            ...(nextOutputs ? { outputs: nextOutputs } : {}),
+          },
+        },
+      };
+    }));
+    setEdges((current) => dedupeEdges(current.filter((edge) => {
+      const link = linkFromEdge(edge);
+      if (!link) return true;
+
+      if (selected.side === 'input') {
+        return !(link.to.node === selected.nodeId && link.to.port === selected.port);
+      }
+
+      return !(link.from.node === selected.nodeId && link.from.port === selected.port);
+    })));
+
+    const frame = editingStack[editingStack.length - 1];
+    if (frame) {
+      setEditingStack((current) => current.map((entry, index) => {
+        if (index !== current.length - 1) return entry;
+
+        const parentEdges = dedupeEdges(entry.parentEdges.filter((edge) => {
+          const link = linkFromEdge(edge);
+          if (!link) return true;
+
+          if (relatedNode.data.patchNode.type === 'Ins' && selected.side === 'output') {
+            return !(link.to.node === entry.groupId && link.to.port === selected.port);
+          }
+
+          if (relatedNode.data.patchNode.type === 'Outs' && selected.side === 'input') {
+            return !(link.from.node === entry.groupId && link.from.port === selected.port);
+          }
+
+          return true;
+        }));
+
+        const parentNodes = entry.parentNodes.map((node) => {
+          if (node.id !== entry.groupId) return node;
+
+          if (relatedNode.data.patchNode.type === 'Ins' && selected.side === 'output') {
+            return {
+              ...node,
+              data: {
+                ...node.data,
+                patchNode: {
+                  ...node.data.patchNode,
+                  params: Object.fromEntries(Object.entries(node.data.patchNode.params).filter(([key]) => key !== selected.port)),
+                  inputs: (node.data.patchNode.inputs ?? []).filter((port) => port.name !== selected.port),
+                },
+              },
+            };
+          }
+
+          if (relatedNode.data.patchNode.type === 'Outs' && selected.side === 'input') {
+            return {
+              ...node,
+              data: {
+                ...node.data,
+                patchNode: {
+                  ...node.data.patchNode,
+                  outputs: (node.data.patchNode.outputs ?? []).filter((port) => port.name !== selected.port),
+                },
+              },
+            };
+          }
+
+          return node;
+        });
+
+        return {
+          ...entry,
+          parentEdges,
+          parentNodes,
+        };
+      }));
+    }
+
+    setPendingBoundaryPort((current) => (
+      current && current.nodeId === selected.nodeId && current.side === selected.side && current.port === selected.port
+        ? null
+        : current
+    ));
+    setSelectedBoundaryPort(null);
+    return true;
+  }, [commitHistory, editingStack, selectedBoundaryPort]);
 
   const addNodeAt = useCallback(
     (event: ReactMouseEvent) => {
@@ -1302,7 +1723,7 @@ function NodeEditorInner() {
       if (!hasModifier || event.altKey) return;
 
       const key = event.key.toLowerCase();
-      if (key === 'u' && !event.shiftKey) {
+      if (key === 'u') {
         event.preventDefault();
         event.stopPropagation();
         setUiHidden((current) => !current);
@@ -1438,6 +1859,55 @@ function NodeEditorInner() {
       future: history.future.slice(1),
     });
   }, [history, restoreSnapshot]);
+
+  useEffect(() => {
+    if (!selectedBoundaryPort) return;
+
+    const node = nodes.find((entry) => entry.id === selectedBoundaryPort.nodeId);
+    if (!node) {
+      setSelectedBoundaryPort(null);
+      return;
+    }
+
+    const ports = selectedBoundaryPort.side === 'input'
+      ? node.data.patchNode.inputs ?? []
+      : node.data.patchNode.outputs ?? [];
+    if (!ports.some((port) => port.name === selectedBoundaryPort.port)) {
+      setSelectedBoundaryPort(null);
+    }
+  }, [nodes, selectedBoundaryPort]);
+
+  useEffect(() => {
+    if (!selectedBoundaryPort) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) return;
+      if (target.closest('.port-name-label')) return;
+      setSelectedBoundaryPort(null);
+    };
+
+    window.addEventListener('pointerdown', handlePointerDown, { capture: true });
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDown, { capture: true });
+    };
+  }, [selectedBoundaryPort]);
+
+  useEffect(() => {
+    const handleBoundaryPortDeleteKeyDown = (event: KeyboardEvent) => {
+      if (isEditableEventTarget(event.target)) return;
+      if (event.key !== 'Backspace' && event.key !== 'Delete') return;
+      if (!deleteSelectedBoundaryPort()) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+    };
+
+    window.addEventListener('keydown', handleBoundaryPortDeleteKeyDown, { capture: true });
+    return () => {
+      window.removeEventListener('keydown', handleBoundaryPortDeleteKeyDown, { capture: true });
+    };
+  }, [deleteSelectedBoundaryPort]);
 
   useEffect(() => {
     const handleBridgeDeleteKeyDown = (event: KeyboardEvent) => {
@@ -1918,11 +2388,22 @@ function applySubpatchToParent(
     ...(port.integer === undefined ? {} : { integer: port.integer }),
   }));
   const groupNode = frame.parentNodes.find((node) => node.id === frame.groupId);
-  const nextGroupId = uniqueNodeId(requestedGroupName, frame.groupId, frame.parentNodes) ?? frame.groupId;
+  const cloneId = groupNode?.data.patchNode.subpatchCloneId;
+  const linkedGroupIds = new Set(
+    frame.parentNodes
+      .filter((node) => (
+        node.data.patchNode.type === 'Group' &&
+        cloneId !== undefined &&
+        node.data.patchNode.subpatchCloneId === cloneId
+      ))
+      .map((node) => node.id),
+  );
+  linkedGroupIds.add(frame.groupId);
+  const nextSubpatchName = normalizeSubpatchName(requestedGroupName, groupNode?.data.patchNode.subpatchName ?? frame.groupId);
   const inputNames = new Set(inputDefinitions.map((port) => port.name));
   const outputNames = new Set(outputDefinitions.map((port) => port.name));
   const nodes: ShaderFlowNode[] = frame.parentNodes.map((node) => {
-    if (node.id !== frame.groupId) return { ...node, selected: false };
+    if (!linkedGroupIds.has(node.id)) return { ...node, selected: false };
 
     const previousParams = node.data.patchNode.params;
     const params = Object.fromEntries(inputDefinitions.map((port) => [
@@ -1932,14 +2413,15 @@ function applySubpatchToParent(
 
     return {
       ...node,
-      id: nextGroupId,
-      selected: true,
+      selected: node.id === frame.groupId,
       data: {
         ...node.data,
         patchNode: {
           ...node.data.patchNode,
-          id: nextGroupId,
+          id: node.id,
           type: 'Group' as const,
+          subpatchName: nextSubpatchName,
+          subpatchCloneId: node.data.patchNode.subpatchCloneId ?? cloneId,
           params,
           inputs: inputDefinitions,
           outputs: outputDefinitions,
@@ -1954,18 +2436,17 @@ function applySubpatchToParent(
   }
 
   const edges = dedupeEdges(frame.parentEdges.flatMap((edge) => {
-    const renamedEdge = renameEdgeNode(edge, frame.groupId, nextGroupId);
-    const link = linkFromEdge(renamedEdge);
+    const link = linkFromEdge(edge);
     if (!link) return [];
 
-    if (link.to.node === nextGroupId && !inputNames.has(link.to.port)) {
+    if (linkedGroupIds.has(link.to.node) && !inputNames.has(link.to.port)) {
       return [];
     }
-    if (link.from.node === nextGroupId && !outputNames.has(link.from.port)) {
+    if (linkedGroupIds.has(link.from.node) && !outputNames.has(link.from.port)) {
       return [];
     }
 
-    return [{ ...renamedEdge, selected: false }];
+    return [{ ...edge, selected: false }];
   }));
 
   return { nodes, edges };
@@ -2087,6 +2568,8 @@ function groupSelectedGraph(nodes: ShaderFlowNode[], edges: ShaderFlowEdge[]): {
       patchNode: {
         id: groupId,
         type: 'Group',
+        subpatchName: groupId,
+        subpatchCloneId: makeSubpatchCloneId(groupId),
         params: Object.fromEntries(inputDefinitions.map((port) => [port.name, 0])),
         position: groupPosition,
         inputs: inputDefinitions,
@@ -2146,6 +2629,8 @@ function patchNodeFromFlowNode(node: ShaderFlowNode): PatchNode {
   return {
     id: patchNode.id,
     type: patchNode.type,
+    ...(patchNode.subpatchName ? { subpatchName: patchNode.subpatchName } : {}),
+    ...(patchNode.subpatchCloneId ? { subpatchCloneId: patchNode.subpatchCloneId } : {}),
     params: { ...patchNode.params },
     position: { ...node.position },
     ...(patchNode.inputs ? { inputs: patchNode.inputs.map((port) => ({ ...port })) } : {}),
@@ -2159,6 +2644,8 @@ function clonePatch(patch: Patch): Patch {
     nodes: patch.nodes.map((node) => ({
       id: node.id,
       type: node.type,
+      ...(node.subpatchName ? { subpatchName: node.subpatchName } : {}),
+      ...(node.subpatchCloneId ? { subpatchCloneId: node.subpatchCloneId } : {}),
       params: { ...node.params },
       ...(node.position ? { position: { ...node.position } } : {}),
       ...(node.inputs ? { inputs: node.inputs.map((port) => ({ ...port })) } : {}),
@@ -2492,18 +2979,68 @@ function graphForNodeIds(nodes: ShaderFlowNode[], edges: ShaderFlowEdge[], nodeI
   return { nodes: graphNodes, edges: graphEdges, boundaryEdges };
 }
 
+function applySourceSubpatchCloneIds(
+  nodes: ShaderFlowNode[],
+  sourceSubpatchCloneIds: Record<string, string>,
+): ShaderFlowNode[] {
+  if (Object.keys(sourceSubpatchCloneIds).length === 0) return nodes;
+
+  return nodes.map((node) => {
+    const cloneId = sourceSubpatchCloneIds[node.id];
+    if (!cloneId) return node;
+    if (node.data.patchNode.subpatchCloneId === cloneId) return node;
+
+    return {
+      ...node,
+      data: {
+        ...node.data,
+        patchNode: {
+          ...node.data.patchNode,
+          subpatchCloneId: cloneId,
+          ...(node.data.patchNode.type === 'Group' && !node.data.patchNode.subpatchName
+            ? { subpatchName: node.id }
+            : {}),
+        },
+      },
+    };
+  });
+}
+
+function normalizeSubpatchName(requestedName: string, fallback: string): string {
+  const trimmed = requestedName.trim();
+  return trimmed.length > 0 ? trimmed : fallback;
+}
+
+function makeSubpatchCloneId(seed: string): string {
+  subpatchCloneSequence += 1;
+  const normalizedSeed = seed.replace(/[^A-Za-z0-9_-]/g, '_') || 'group';
+  return `subpatch_clone_${normalizedSeed}_${subpatchCloneSequence}`;
+}
+
 function duplicateGraph(
   graph: CopiedGraph,
   existingNodes: ShaderFlowNode[],
   positionForNode: (node: ShaderFlowNode) => { x: number; y: number },
   options: { includeBoundaryEdges?: boolean } = {},
-): CopiedGraph {
+): DuplicateGraphResult {
   const existingIds = new Set(existingNodes.map((node) => node.id));
   const idMap = new Map<string, string>();
+  const sourceSubpatchCloneIds: Record<string, string> = {};
   const nodes = graph.nodes.map((node): ShaderFlowNode => {
     const type = node.data.patchNode.type ?? 'node';
     const id = makeNodeId(type, existingIds);
     const position = positionForNode(node);
+    const subpatchName = node.data.patchNode.subpatch
+      ? (node.data.patchNode.subpatchName ?? node.id)
+      : node.data.patchNode.subpatchName;
+    const subpatchCloneId = node.data.patchNode.subpatch
+      ? (node.data.patchNode.subpatchCloneId ?? makeSubpatchCloneId(node.id))
+      : undefined;
+
+    if (subpatchCloneId && !node.data.patchNode.subpatchCloneId) {
+      sourceSubpatchCloneIds[node.id] = subpatchCloneId;
+    }
+
     existingIds.add(id);
     idMap.set(node.id, id);
 
@@ -2524,6 +3061,8 @@ function duplicateGraph(
         patchNode: {
           id,
           type: node.data.patchNode.type,
+          ...(subpatchName ? { subpatchName } : {}),
+          ...(subpatchCloneId ? { subpatchCloneId } : {}),
           params: { ...node.data.patchNode.params },
           position,
           ...(node.data.patchNode.inputs ? { inputs: node.data.patchNode.inputs.map((port) => ({ ...port })) } : {}),
@@ -2564,7 +3103,7 @@ function duplicateGraph(
     }];
   });
 
-  return { nodes, edges, boundaryEdges: [] };
+  return { nodes, edges, boundaryEdges: [], sourceSubpatchCloneIds };
 }
 
 function cloneFlowNodeSnapshot(node: ShaderFlowNode): ShaderFlowNode {
@@ -3050,6 +3589,130 @@ function dedupeEdges(edges: ShaderFlowEdge[]): ShaderFlowEdge[] {
   }
 
   return deduped;
+}
+
+function syncEditingStackMidiCcValues(
+  editingStack: SubpatchEditFrame[],
+  values: MidiCcValueMap,
+): SubpatchEditFrame[] {
+  let changed = false;
+  const nextStack = editingStack.map((frame) => {
+    const nextParentNodes = syncNodesWithMidiCcValues(frame.parentNodes, values);
+    if (nextParentNodes === frame.parentNodes) {
+      return frame;
+    }
+
+    changed = true;
+    return {
+      ...frame,
+      parentNodes: nextParentNodes,
+    };
+  });
+
+  return changed ? nextStack : editingStack;
+}
+
+function syncNodesWithMidiCcValues(nodes: ShaderFlowNode[], values: MidiCcValueMap): ShaderFlowNode[] {
+  let changed = false;
+  const nextNodes = nodes.map((node) => {
+    if (node.data.patchNode.type !== 'midiCC') return node;
+
+    const nextParams = syncMidiCcParams(node.data.patchNode.params, values);
+    if (nextParams === node.data.patchNode.params) {
+      return node;
+    }
+
+    changed = true;
+    return {
+      ...node,
+      data: {
+        ...node.data,
+        patchNode: {
+          ...node.data.patchNode,
+          params: nextParams,
+        },
+      },
+    };
+  });
+
+  return changed ? nextNodes : nodes;
+}
+
+function syncMidiCcParams(params: Record<string, number>, values: MidiCcValueMap): Record<string, number> {
+  const channel = normalizeMidiChannel(params.channel ?? 1);
+  const cc = normalizeMidiCc(params.cc ?? 1);
+  const persistedValue = values.get(midiCcKey(channel, cc));
+  if (persistedValue === undefined) {
+    return params;
+  }
+
+  const currentValue = params.value ?? 0;
+  if (Math.abs(currentValue - persistedValue) < 0.000001) {
+    return params;
+  }
+
+  return {
+    ...params,
+    value: persistedValue,
+  };
+}
+
+function midiCcKey(channel: number, cc: number): string {
+  return `${normalizeMidiChannel(channel)}:${normalizeMidiCc(cc)}`;
+}
+
+function normalizeMidiChannel(value: number): number {
+  return clampInteger(value, 1, 16);
+}
+
+function normalizeMidiCc(value: number): number {
+  return clampInteger(value, 0, 127);
+}
+
+function normalizeMidiValue(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(1, value));
+}
+
+function clampInteger(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
+  const rounded = Math.round(value);
+  return Math.max(min, Math.min(max, rounded));
+}
+
+function loadMidiCcValues(): MidiCcValueMap {
+  const values = new Map<string, number>();
+
+  try {
+    const raw = window.localStorage.getItem(MIDI_CC_STORAGE_KEY);
+    if (!raw) return values;
+
+    const parsed = JSON.parse(raw) as unknown;
+    if (!isRecord(parsed)) return values;
+
+    for (const [key, value] of Object.entries(parsed)) {
+      if (typeof value !== 'number' || !Number.isFinite(value)) continue;
+      const [channelText, ccText] = key.split(':');
+      const channel = Number(channelText);
+      const cc = Number(ccText);
+      if (!Number.isFinite(channel) || !Number.isFinite(cc)) continue;
+
+      values.set(midiCcKey(channel, cc), normalizeMidiValue(value));
+    }
+  } catch {
+    return values;
+  }
+
+  return values;
+}
+
+function saveMidiCcValues(values: MidiCcValueMap): void {
+  try {
+    const serialized = Object.fromEntries(values.entries());
+    window.localStorage.setItem(MIDI_CC_STORAGE_KEY, JSON.stringify(serialized));
+  } catch {
+    // Local storage can be unavailable in private or restricted browsing contexts.
+  }
 }
 
 function loadInitialEditorState(): PersistedEditorState | null {

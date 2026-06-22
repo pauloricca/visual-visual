@@ -38,6 +38,7 @@ export type NodeType =
   | 'Noise3Fast'
   | 'Buffer'
   | 'Delay'
+  | 'midiCC'
   | 'Camera'
   | 'Envelope'
   | 'Scope'
@@ -54,6 +55,8 @@ export interface Vec2 {
 export interface PatchNode {
   id: string;
   type: NodeType;
+  subpatchName?: string;
+  subpatchCloneId?: string;
   params: Record<string, number>;
   position?: Vec2;
   inputs?: PortDefinition[];

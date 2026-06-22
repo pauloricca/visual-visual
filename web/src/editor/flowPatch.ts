@@ -15,6 +15,9 @@ export interface ShaderNodeData extends Record<string, unknown> {
   onPortDoubleClick: (nodeId: string, side: 'input' | 'output', port: string) => void;
   onPortNameChange: (nodeId: string, side: 'input' | 'output', port: string, nextPort: string) => void;
   onPortMove: (nodeId: string, side: 'input' | 'output', port: string, direction: -1 | 1) => void;
+  onPortSelect?: (nodeId: string, side: 'input' | 'output', port: string) => void;
+  selectedPort?: { side: 'input' | 'output'; name: string } | null;
+  previewPort?: { side: 'input' | 'output'; name: string } | null;
   isTypePickerOpen: boolean;
 }
 
@@ -47,6 +50,8 @@ export interface PersistedEditorState {
   nodes: Array<{
     id: string;
     type: NodeType | null;
+    subpatchName?: string;
+    subpatchCloneId?: string;
     params: Record<string, number>;
     position: { x: number; y: number };
     inputs?: PatchNode['inputs'];
@@ -138,6 +143,8 @@ export function editorStateToFlowNodes(
       patchNode: {
         id: node.id,
         type: node.type,
+        ...(node.subpatchName ? { subpatchName: node.subpatchName } : {}),
+        ...(node.subpatchCloneId ? { subpatchCloneId: node.subpatchCloneId } : {}),
         params: node.params,
         position: node.position,
         ...(node.inputs ? { inputs: node.inputs } : {}),
@@ -195,6 +202,8 @@ export function flowToEditorState(
     nodes: nodes.map((node) => ({
       id: node.id,
       type: node.data.patchNode.type,
+      ...(node.data.patchNode.subpatchName ? { subpatchName: node.data.patchNode.subpatchName } : {}),
+      ...(node.data.patchNode.subpatchCloneId ? { subpatchCloneId: node.data.patchNode.subpatchCloneId } : {}),
       params: node.data.patchNode.params,
       position: node.position,
       ...(node.data.patchNode.inputs ? { inputs: node.data.patchNode.inputs } : {}),
@@ -223,6 +232,8 @@ export function patchFromFlow(nodes: ShaderFlowNode[], edges: ShaderFlowEdge[]):
     patchNodes.push({
       id: patchNode.id,
       type: patchNode.type,
+      ...(patchNode.subpatchName ? { subpatchName: patchNode.subpatchName } : {}),
+      ...(patchNode.subpatchCloneId ? { subpatchCloneId: patchNode.subpatchCloneId } : {}),
       params: patchNode.params,
       position: node.position,
       ...(patchNode.inputs ? { inputs: patchNode.inputs } : {}),

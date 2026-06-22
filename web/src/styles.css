@@ -124,18 +124,6 @@ select:hover {
   text-align: center;
 }
 
-.viewport-button-ui {
-  width: auto;
-  min-width: var(--control-size);
-  padding: 0 8px;
-}
-
-.viewport-button-history {
-  width: auto;
-  min-width: var(--control-size);
-  padding: 0 7px;
-}
-
 .viewport-button:disabled {
   color: rgba(255, 255, 255, 0.34);
   cursor: default;
@@ -256,6 +244,7 @@ select:hover {
 .react-flow__selection {
   border: 1px solid #fff;
   background: rgba(255, 255, 255, 0.12);
+  pointer-events: none;
 }
 
 .react-flow__nodesselection-rect {
@@ -263,6 +252,7 @@ select:hover {
   background: transparent !important;
   box-shadow: none !important;
   outline: 0;
+  pointer-events: none;
 }
 
 .react-flow__minimap-mask {
@@ -344,6 +334,11 @@ select:hover {
   background: #fff;
   color: #000;
   font-weight: 700;
+}
+
+.shader-node-group .shader-node-title {
+  background: #c7e8ff;
+  color: #000;
 }
 
 .node-type-picker-button {
@@ -597,6 +592,10 @@ select:hover {
   white-space: nowrap;
 }
 
+.shader-port-preview {
+  opacity: 0.42;
+}
+
 .port-name-label {
   user-select: none;
   -webkit-user-select: none;
@@ -622,6 +621,15 @@ select:hover {
 
 .port-name-label-drag-source {
   opacity: 0.58;
+}
+
+.port-name-label-selected {
+  outline: 1px solid rgba(255, 255, 255, 0.9);
+  outline-offset: 2px;
+}
+
+.port-name-label-preview {
+  font-style: italic;
 }
 
 .port-name-editor {

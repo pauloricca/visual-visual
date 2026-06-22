@@ -489,6 +489,9 @@ function emitOutput(node: PatchNode, port: string, context: CompileContext): str
       }
       return `texture(${slot.samplerName}, uv).r`;
     }
+    case 'midiCC':
+      assertPort(node, port, 'value');
+      return input(node, 'value', context);
     default:
       throw new Error(`Unsupported node type "${node.type}".`);
   }
