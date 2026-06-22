@@ -1,20 +1,24 @@
 import { Handle, Position, useUpdateNodeInternals, type NodeProps } from '@xyflow/react';
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from 'react';
-import { getDefinition, NODE_TYPE_LIST } from '../graph/nodeTypes';
+import { getNodeDefinition, getNodeTypeLabel, NODE_TYPE_LIST } from '../graph/nodeTypes';
 import type { NodeType, PatchNode } from '../graph/types';
 import type { ShaderFlowNode, ShaderNodeData } from './flowPatch';
 
 export function ShaderNode({ data, selected, dragging }: NodeProps<ShaderFlowNode>) {
   const node = data.patchNode;
   const updateNodeInternals = useUpdateNodeInternals();
-  const definition = node.type ? getDefinition(node.type) : null;
+  const definition = node.type ? getNodeDefinition(node as PatchNode) : null;
   const isScope = node.type === 'Scope';
   const isMeter = node.type === 'Meter';
+  const canRenameInputs = node.type === 'Outs';
+  const canRenameOutputs = node.type === 'Ins';
   const outputCount = definition?.outputs.length ?? 0;
-  const singleOutput = outputCount === 1 ? definition?.outputs[0] : null;
-  const hasBodyOutputs = outputCount > 1;
+  const hasBodyOutputs = outputCount > 0;
   const inputLabelWidth = definition
     ? `${Math.max(0, ...definition.inputs.map((input) => input.name.length))}ch`
+    : '0ch';
+  const outputLabelWidth = definition
+    ? `${Math.max(0, ...definition.outputs.map((output) => output.name.length))}ch`
     : '0ch';
   const inputStyle = { '--input-label-width': inputLabelWidth } as CSSProperties;
   const className = [
@@ -28,30 +32,19 @@ export function ShaderNode({ data, selected, dragging }: NodeProps<ShaderFlowNod
   useLayoutEffect(() => {
     const animationFrame = requestAnimationFrame(() => updateNodeInternals(node.id));
     return () => cancelAnimationFrame(animationFrame);
-  }, [hasBodyOutputs, inputLabelWidth, node.id, outputCount, updateNodeInternals]);
+  }, [hasBodyOutputs, inputLabelWidth, node.id, outputCount, outputLabelWidth, updateNodeInternals]);
 
   return (
     <div className={className}>
       <div className="shader-node-title">
         <NodeTypePicker
           nodeType={node.type}
+          displayLabel={node.type === 'Group' ? node.id : undefined}
           open={data.isTypePickerOpen}
           onOpen={() => data.onTypeEditStart(node.id)}
           onClose={data.onTypeEditEnd}
           onChange={(type) => data.onTypeChange(node.id, type)}
         />
-        {singleOutput ? (
-          <Handle
-            id={`out:${singleOutput.name}`}
-            type="source"
-            position={Position.Right}
-            className="shader-handle shader-handle-output shader-handle-output-title"
-            onDoubleClick={(event) => {
-              event.stopPropagation();
-              data.onPortDoubleClick(node.id, 'output', singleOutput.name);
-            }}
-          />
-        ) : null}
       </div>
       {definition && isScope ? (
         <div className="shader-node-body shader-node-body-scope">
@@ -90,7 +83,7 @@ export function ShaderNode({ data, selected, dragging }: NodeProps<ShaderFlowNod
           !hasBodyOutputs ? 'shader-node-body-no-outputs' : '',
         ].filter(Boolean).join(' ')}>
           <div className="shader-ports shader-inputs" style={inputStyle}>
-            {definition.inputs.map((input) => (
+            {definition.inputs.map((input, index) => (
             <div
               className="shader-port shader-port-input"
               key={input.name}
@@ -112,7 +105,18 @@ export function ShaderNode({ data, selected, dragging }: NodeProps<ShaderFlowNod
                   }}
                 />
               ) : null}
-              <span>{input.name}</span>
+              <PortNameLabel
+                name={input.name}
+                editable={canRenameInputs}
+                onChange={(nextName) => data.onPortNameChange(node.id, 'input', input.name, nextName)}
+              />
+              {canRenameInputs ? (
+                <PortReorderControls
+                  canMoveUp={index > 0}
+                  canMoveDown={index < definition.inputs.length - 1}
+                  onMove={(direction) => data.onPortMove(node.id, 'input', input.name, direction)}
+                />
+              ) : null}
               <NumericScrubber
                 value={node.params[input.name] ?? input.defaultValue ?? 0}
                 min={input.min}
@@ -125,7 +129,7 @@ export function ShaderNode({ data, selected, dragging }: NodeProps<ShaderFlowNod
           </div>
           {hasBodyOutputs ? (
             <div className="shader-ports shader-outputs">
-              {definition.outputs.map((output) => (
+              {definition.outputs.map((output, index) => (
               <div
                 className="shader-port shader-port-output"
                 key={output.name}
@@ -134,7 +138,18 @@ export function ShaderNode({ data, selected, dragging }: NodeProps<ShaderFlowNod
                   data.onPortDoubleClick(node.id, 'output', output.name);
                 }}
               >
-                <span>{output.name}</span>
+                <PortNameLabel
+                  name={output.name}
+                  editable={canRenameOutputs}
+                  onChange={(nextName) => data.onPortNameChange(node.id, 'output', output.name, nextName)}
+                />
+                {canRenameOutputs ? (
+                  <PortReorderControls
+                    canMoveUp={index > 0}
+                    canMoveDown={index < definition.outputs.length - 1}
+                    onMove={(direction) => data.onPortMove(node.id, 'output', output.name, direction)}
+                  />
+                ) : null}
                 <Handle
                   id={`out:${output.name}`}
                   type="source"
@@ -180,35 +195,173 @@ export function ShaderNode({ data, selected, dragging }: NodeProps<ShaderFlowNod
   );
 }
 
+interface PortReorderControlsProps {
+  canMoveUp: boolean;
+  canMoveDown: boolean;
+  onMove: (direction: -1 | 1) => void;
+}
+
+function PortReorderControls({ canMoveUp, canMoveDown, onMove }: PortReorderControlsProps) {
+  return (
+    <div
+      className="port-reorder-controls nodrag nopan"
+      onDoubleClick={(event) => event.stopPropagation()}
+      onMouseDown={(event) => event.stopPropagation()}
+      onPointerDown={(event) => event.stopPropagation()}
+    >
+      <button
+        type="button"
+        className="port-reorder-button"
+        title="Move port up"
+        disabled={!canMoveUp}
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          onMove(-1);
+        }}
+      >
+        ^
+      </button>
+      <button
+        type="button"
+        className="port-reorder-button"
+        title="Move port down"
+        disabled={!canMoveDown}
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          onMove(1);
+        }}
+      >
+        v
+      </button>
+    </div>
+  );
+}
+
 interface NodeTypePickerProps {
   nodeType: NodeType | null;
+  displayLabel?: string;
   open: boolean;
   onOpen: () => void;
   onClose: () => void;
   onChange: (type: NodeType) => void;
 }
 
-function NodeTypePicker({ nodeType, open, onOpen, onClose, onChange }: NodeTypePickerProps) {
-  const [query, setQuery] = useState<string>(nodeType ?? '');
+interface PortNameLabelProps {
+  name: string;
+  editable: boolean;
+  onChange: (nextName: string) => void;
+}
+
+function PortNameLabel({ name, editable, onChange }: PortNameLabelProps) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(name);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (!editing) {
+      setDraft(name);
+    }
+  }, [editing, name]);
+
+  useEffect(() => {
+    if (!editing) return;
+
+    const animationFrame = requestAnimationFrame(() => {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    });
+    return () => cancelAnimationFrame(animationFrame);
+  }, [editing]);
+
+  function commitDraft() {
+    onChange(draft);
+    setEditing(false);
+  }
+
+  function cancelDraft() {
+    setDraft(name);
+    setEditing(false);
+  }
+
+  if (editing) {
+    return (
+      <input
+        ref={inputRef}
+        className="port-name-editor nodrag nopan"
+        value={draft}
+        onChange={(event) => setDraft(event.currentTarget.value)}
+        onBlur={commitDraft}
+        onKeyDown={(event) => {
+          event.stopPropagation();
+          if (event.key === 'Enter') {
+            commitDraft();
+          }
+          if (event.key === 'Escape') {
+            cancelDraft();
+          }
+        }}
+        onPointerDown={(event) => event.stopPropagation()}
+        onMouseDown={(event) => event.stopPropagation()}
+        onDoubleClick={(event) => event.stopPropagation()}
+        spellCheck={false}
+      />
+    );
+  }
+
+  return (
+    <span
+      className={editable ? 'port-name-label port-name-label-editable' : 'port-name-label'}
+      tabIndex={editable ? 0 : undefined}
+      title={editable ? 'Rename port' : undefined}
+      onDoubleClick={(event) => {
+        if (!editable) return;
+        event.preventDefault();
+        event.stopPropagation();
+        setEditing(true);
+      }}
+      onKeyDown={(event) => {
+        if (!editable) return;
+        event.stopPropagation();
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          setEditing(true);
+        }
+      }}
+    >
+      {name}
+    </span>
+  );
+}
+
+function NodeTypePicker({ nodeType, displayLabel, open, onOpen, onClose, onChange }: NodeTypePickerProps) {
+  const [query, setQuery] = useState<string>(nodeType ? getNodeTypeLabel(nodeType) : '');
   const [highlightedIndex, setHighlightedIndex] = useState(0);
   const [dragIntent, setDragIntent] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const pointerStartRef = useRef<{ x: number; y: number } | null>(null);
-  const options = NODE_TYPE_LIST.filter((type) =>
-    type.toLowerCase().includes(query.trim().toLowerCase()),
-  );
+  const options = NODE_TYPE_LIST.filter((type) => {
+    const normalizedQuery = query.trim().toLowerCase();
+    return (
+      type.toLowerCase().includes(normalizedQuery) ||
+      getNodeTypeLabel(type).toLowerCase().includes(normalizedQuery)
+    );
+  });
+  const nodeTypeLabel = nodeType ? getNodeTypeLabel(nodeType) : 'type';
+  const pickerLabel = displayLabel ?? nodeTypeLabel;
 
   useEffect(() => {
     if (!open) {
-      setQuery(nodeType ?? '');
+      setQuery(nodeType ? getNodeTypeLabel(nodeType) : '');
       setHighlightedIndex(0);
     }
   }, [nodeType, open]);
 
   useEffect(() => {
     if (open) {
-      setQuery(nodeType ?? '');
+      setQuery(nodeType ? getNodeTypeLabel(nodeType) : '');
       setHighlightedIndex(0);
       const focusAndSelect = () => {
         inputRef.current?.focus({ preventScroll: true });
@@ -300,14 +453,14 @@ function NodeTypePicker({ nodeType, open, onOpen, onClose, onChange }: NodeTypeP
           onOpen();
         }}
       >
-        {nodeType ?? 'type'}
+        {pickerLabel}
       </button>
     );
   }
 
   return (
     <span className="node-type-picker-open-shell">
-      <span className="node-type-picker-placeholder" aria-hidden="true">{nodeType ?? 'type'}</span>
+      <span className="node-type-picker-placeholder" aria-hidden="true">{pickerLabel}</span>
       <div className="node-type-picker nodrag nopan nowheel" onMouseDown={(event) => event.stopPropagation()}>
         <input
           ref={inputRef}
@@ -347,7 +500,7 @@ function NodeTypePicker({ nodeType, open, onOpen, onClose, onChange }: NodeTypeP
                 choose(type);
               }}
             >
-              {type}
+              {getNodeTypeLabel(type)}
             </button>
           ))}
           {options.length === 0 ? <div className="node-type-picker-empty">no match</div> : null}

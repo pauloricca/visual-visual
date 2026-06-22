@@ -92,6 +92,27 @@ select:hover {
   align-items: center;
 }
 
+.patch-name-input {
+  width: min(220px, 28vw);
+  height: var(--control-size);
+  padding: 0 8px;
+  border: 1px solid #fff;
+  background: var(--surface-bg);
+  color: #fff;
+  line-height: 26px;
+}
+
+.patch-name-input::placeholder {
+  color: rgba(255, 255, 255, 0.56);
+}
+
+.patch-name-input:hover,
+.patch-name-input:focus {
+  background: var(--surface-bg);
+  color: #fff;
+  outline: 0;
+}
+
 .viewport-button {
   width: var(--control-size);
   height: var(--control-size);
@@ -158,6 +179,11 @@ select:hover {
   color: #ff7474;
   pointer-events: none;
   white-space: pre-wrap;
+}
+
+.app-shell-visual-hidden .webgl-preview,
+.app-shell-visual-hidden .webgl-error {
+  display: none;
 }
 
 .fps-counter {
@@ -230,6 +256,13 @@ select:hover {
 .react-flow__selection {
   border: 1px solid #fff;
   background: rgba(255, 255, 255, 0.12);
+}
+
+.react-flow__nodesselection-rect {
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  outline: 0;
 }
 
 .react-flow__minimap-mask {
@@ -494,6 +527,7 @@ select:hover {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  min-width: max-content;
 }
 
 .shader-port {
@@ -501,6 +535,7 @@ select:hover {
   display: flex;
   align-items: center;
   height: 26px;
+  min-width: max-content;
 }
 
 .shader-port-input {
@@ -509,9 +544,9 @@ select:hover {
 
 .shader-port-input span {
   width: var(--input-label-width, auto);
-  max-width: 58px;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  flex: 0 0 auto;
+  overflow: visible;
+  text-overflow: clip;
   white-space: nowrap;
 }
 
@@ -550,15 +585,63 @@ select:hover {
 }
 
 .shader-port-output {
+  gap: 6px;
   justify-content: flex-end;
   padding-right: 4px;
 }
 
 .shader-port-output span {
-  overflow: hidden;
-  max-width: 58px;
-  text-overflow: ellipsis;
+  flex: 0 0 auto;
+  overflow: visible;
+  text-overflow: clip;
   white-space: nowrap;
+}
+
+.port-name-label-editable {
+  cursor: text;
+}
+
+.port-name-label-editable:focus {
+  outline: 1px solid #fff;
+  outline-offset: 2px;
+}
+
+.port-name-editor {
+  width: max(7ch, 100%);
+  min-width: max-content;
+  height: 22px;
+  padding: 0 4px;
+  border: 1px solid #fff;
+  background: #000;
+  color: #fff;
+  font: inherit;
+  line-height: 20px;
+}
+
+.port-reorder-controls {
+  display: inline-flex;
+  gap: 2px;
+  flex: 0 0 auto;
+}
+
+.port-reorder-button {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid #fff;
+  border-radius: 0;
+  background: transparent;
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+  line-height: 16px;
+}
+
+.port-reorder-button:disabled {
+  border-color: rgba(255, 255, 255, 0.35);
+  color: rgba(255, 255, 255, 0.35);
+  cursor: default;
 }
 
 .shader-handle {
@@ -591,25 +674,46 @@ select:hover {
   right: -4px;
 }
 
-.shader-edge .react-flow__edge-path,
-.shader-edge-path {
+.shader-edge .shader-edge-path-foreground,
+.shader-edge-path-foreground {
   stroke: #fff;
-  stroke-width: 1.5;
+  stroke-width: 2;
 }
 
-.shader-edge-feedback .react-flow__edge-path,
-.shader-edge-feedback.shader-edge-path {
+.shader-edge .shader-edge-path-underlay,
+.shader-edge-path-underlay {
+  stroke: #0b0b0b;
+  stroke-width: 5.4;
+  pointer-events: none;
+}
+
+.shader-edge-feedback .shader-edge-path-foreground,
+.shader-edge-feedback.shader-edge-path-foreground {
   stroke: #ffe45c;
 }
 
-.react-flow__edge.selected .react-flow__edge-path,
+.react-flow__edge.selected .shader-edge-path-foreground,
 .shader-edge-path-selected {
-  stroke: #8fd7ff;
-  stroke-width: 2.5;
+  stroke: #b8b8b8;
+  stroke-width: 2;
 }
 
-.shader-edge-preview .shader-edge-path {
-  stroke: rgba(255, 255, 255, 0.62);
+.react-flow__edge.selected .shader-edge-path-underlay {
+  stroke: #0b0b0b;
+  stroke-width: 6;
+}
+
+.shader-edge-preview .shader-edge-path-underlay,
+.shader-edge-preview.shader-edge-path-underlay {
+  stroke: rgba(0, 0, 0, 0.82);
+  stroke-width: 5;
+  stroke-dasharray: 5 5;
+  pointer-events: none;
+}
+
+.shader-edge-preview .shader-edge-path-foreground,
+.shader-edge-preview.shader-edge-path-foreground {
+  stroke: rgba(255, 255, 255, 0.72);
   stroke-dasharray: 5 5;
   pointer-events: none;
 }

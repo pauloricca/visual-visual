@@ -27,6 +27,7 @@ export type NodeType =
   | 'Pulse'
   | 'Triangle'
   | 'Polar'
+  | 'toPolar'
   | 'HSV'
   | 'Gate'
   | 'Rotate'
@@ -35,11 +36,15 @@ export type NodeType =
   | 'Noise'
   | 'Noise3'
   | 'Noise3Fast'
+  | 'Buffer'
   | 'Delay'
   | 'Camera'
   | 'Envelope'
   | 'Scope'
-  | 'Meter';
+  | 'Meter'
+  | 'Group'
+  | 'Ins'
+  | 'Outs';
 
 export interface Vec2 {
   x: number;
@@ -51,6 +56,9 @@ export interface PatchNode {
   type: NodeType;
   params: Record<string, number>;
   position?: Vec2;
+  inputs?: PortDefinition[];
+  outputs?: PortDefinition[];
+  subpatch?: Patch;
 }
 
 export interface Endpoint {

@@ -11,7 +11,10 @@ import type { LinkMode } from '../graph/types';
 import { useEdgeOverlayTarget } from './EdgeOverlayContext';
 import type { ShaderFlowEdge } from './flowPatch';
 
+const LINK_CONTROLS_SHOW_DELAY_MS = 260;
+
 export function ShaderEdge(props: EdgeProps<ShaderFlowEdge>) {
+  const [linkControlsVisible, setLinkControlsVisible] = useState(false);
   const [edgePath, labelX, labelY] = getBezierPath(props);
   const overlayTarget = useEdgeOverlayTarget();
   const reactFlow = useReactFlow();
@@ -19,20 +22,47 @@ export function ShaderEdge(props: EdgeProps<ShaderFlowEdge>) {
   const screenPosition = reactFlow.flowToScreenPosition({ x: labelX, y: labelY });
   const weight = props.data?.weight ?? 1;
   const selected = props.selected ?? false;
+  const showLinkControls = selected && props.data?.showLinkControls === true;
+  const underlayClassName = [
+    'shader-edge-path',
+    'shader-edge-path-underlay',
+  ].join(' ');
   const edgeClassName = [
     'shader-edge-path',
+    'shader-edge-path-foreground',
     selected ? 'shader-edge-path-selected' : '',
   ].filter(Boolean).join(' ');
+  const selectedUnderlayStyle = selected ? { stroke: '#0b0b0b', strokeWidth: 6 } : undefined;
+  const selectedForegroundStyle = selected ? { stroke: '#b8b8b8', strokeWidth: 2 } : undefined;
+
+  useEffect(() => {
+    if (!showLinkControls) {
+      setLinkControlsVisible(false);
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => setLinkControlsVisible(true), LINK_CONTROLS_SHOW_DELAY_MS);
+    return () => window.clearTimeout(timeoutId);
+  }, [showLinkControls]);
 
   return (
     <>
       <BaseEdge
+        id={`${props.id}-underlay`}
+        path={edgePath}
+        className={underlayClassName}
+        style={selectedUnderlayStyle}
+        interactionWidth={0}
+        aria-hidden="true"
+      />
+      <BaseEdge
         id={props.id}
         path={edgePath}
         className={edgeClassName}
+        style={selectedForegroundStyle}
         interactionWidth={18}
       />
-      {selected && overlayTarget ? (
+      {showLinkControls && linkControlsVisible && overlayTarget ? (
         createPortal(
           <div
             className="edge-weight-label nodrag nopan"

@@ -13,6 +13,8 @@ export interface ShaderNodeData extends Record<string, unknown> {
   onTypeEditEnd: () => void;
   onIdChange: (nodeId: string, nextId: string) => void;
   onPortDoubleClick: (nodeId: string, side: 'input' | 'output', port: string) => void;
+  onPortNameChange: (nodeId: string, side: 'input' | 'output', port: string, nextPort: string) => void;
+  onPortMove: (nodeId: string, side: 'input' | 'output', port: string, direction: -1 | 1) => void;
   isTypePickerOpen: boolean;
 }
 
@@ -24,6 +26,7 @@ export interface ShaderEdgeData extends Record<string, unknown> {
   onWeightChange: (edgeId: string, weight: number) => void;
   onModeChange: (edgeId: string, mode: LinkMode) => void;
   onInsertNode: (edgeId: string) => void;
+  showLinkControls?: boolean;
 }
 
 export type ShaderFlowEdge = Edge<ShaderEdgeData, 'shaderEdge'>;
@@ -31,6 +34,8 @@ export type ShaderFlowEdge = Edge<ShaderEdgeData, 'shaderEdge'>;
 export interface PersistedEditorState {
   version: 1;
   ui?: {
+    patchName?: string;
+    visualizationVisible?: boolean;
     sidePanelOpen?: boolean;
     exportPanelView?: 'glsl' | 'json';
     viewport?: {
@@ -44,6 +49,9 @@ export interface PersistedEditorState {
     type: NodeType | null;
     params: Record<string, number>;
     position: { x: number; y: number };
+    inputs?: PatchNode['inputs'];
+    outputs?: PatchNode['outputs'];
+    subpatch?: Patch;
   }>;
   edges: Array<{
     id: string;
@@ -64,6 +72,8 @@ export function toFlowNodes(
   onTypeEditEnd: ShaderNodeData['onTypeEditEnd'],
   onIdChange: ShaderNodeData['onIdChange'],
   onPortDoubleClick: ShaderNodeData['onPortDoubleClick'],
+  onPortNameChange: ShaderNodeData['onPortNameChange'],
+  onPortMove: ShaderNodeData['onPortMove'],
   editingTypeNodeId: string | null,
 ): ShaderFlowNode[] {
   return patch.nodes.map((patchNode) => ({
@@ -78,6 +88,8 @@ export function toFlowNodes(
       onTypeEditEnd,
       onIdChange,
       onPortDoubleClick,
+      onPortNameChange,
+      onPortMove,
       isTypePickerOpen: editingTypeNodeId === patchNode.id,
     },
   }));
@@ -114,6 +126,8 @@ export function editorStateToFlowNodes(
   onTypeEditEnd: ShaderNodeData['onTypeEditEnd'],
   onIdChange: ShaderNodeData['onIdChange'],
   onPortDoubleClick: ShaderNodeData['onPortDoubleClick'],
+  onPortNameChange: ShaderNodeData['onPortNameChange'],
+  onPortMove: ShaderNodeData['onPortMove'],
   editingTypeNodeId: string | null,
 ): ShaderFlowNode[] {
   return state.nodes.map((node) => ({
@@ -126,6 +140,9 @@ export function editorStateToFlowNodes(
         type: node.type,
         params: node.params,
         position: node.position,
+        ...(node.inputs ? { inputs: node.inputs } : {}),
+        ...(node.outputs ? { outputs: node.outputs } : {}),
+        ...(node.subpatch ? { subpatch: node.subpatch } : {}),
       },
       onParamChange,
       onTypeChange,
@@ -133,6 +150,8 @@ export function editorStateToFlowNodes(
       onTypeEditEnd,
       onIdChange,
       onPortDoubleClick,
+      onPortNameChange,
+      onPortMove,
       isTypePickerOpen: editingTypeNodeId === node.id,
     },
   }));
@@ -178,6 +197,9 @@ export function flowToEditorState(
       type: node.data.patchNode.type,
       params: node.data.patchNode.params,
       position: node.position,
+      ...(node.data.patchNode.inputs ? { inputs: node.data.patchNode.inputs } : {}),
+      ...(node.data.patchNode.outputs ? { outputs: node.data.patchNode.outputs } : {}),
+      ...(node.data.patchNode.subpatch ? { subpatch: node.data.patchNode.subpatch } : {}),
     })),
     edges: edges.map((edge) => ({
       id: edge.id,
@@ -203,6 +225,9 @@ export function patchFromFlow(nodes: ShaderFlowNode[], edges: ShaderFlowEdge[]):
       type: patchNode.type,
       params: patchNode.params,
       position: node.position,
+      ...(patchNode.inputs ? { inputs: patchNode.inputs } : {}),
+      ...(patchNode.outputs ? { outputs: patchNode.outputs } : {}),
+      ...(patchNode.subpatch ? { subpatch: patchNode.subpatch } : {}),
     });
   }
 

@@ -8,6 +8,9 @@ export function normalizePatch(patch: Patch): Patch {
         type: node.type,
         params: sortRecord(node.params),
         ...(node.position ? { position: node.position } : {}),
+        ...(node.inputs ? { inputs: node.inputs.map((input) => ({ ...input })) } : {}),
+        ...(node.outputs ? { outputs: node.outputs.map((output) => ({ ...output })) } : {}),
+        ...(node.subpatch ? { subpatch: normalizePatch(node.subpatch) } : {}),
       }))
       .sort((a, b) => a.id.localeCompare(b.id)),
     links: [...patch.links].sort(compareLinks),

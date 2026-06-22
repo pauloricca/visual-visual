@@ -1,4 +1,4 @@
-import type { NodeDefinition, NodeType } from './types';
+import type { NodeDefinition, NodeType, PatchNode } from './types';
 
 export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
   System: {
@@ -114,6 +114,17 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
       { name: 'y' },
     ],
   },
+  toPolar: {
+    type: 'toPolar',
+    inputs: [
+      { name: 'x', defaultValue: 0 },
+      { name: 'y', defaultValue: 0 },
+    ],
+    outputs: [
+      { name: 'radius' },
+      { name: 'angle' },
+    ],
+  },
   HSV: {
     type: 'HSV',
     inputs: [
@@ -202,6 +213,19 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
     ],
     outputs: [{ name: 'value' }],
   },
+  Buffer: {
+    type: 'Buffer',
+    inputs: [
+      { name: 'inX', defaultValue: 0 },
+      { name: 'inY', defaultValue: 0 },
+      { name: 'outX', defaultValue: 0 },
+      { name: 'outY', defaultValue: 0 },
+    ],
+    outputs: [
+      { name: 'x' },
+      { name: 'y' },
+    ],
+  },
   Delay: {
     type: 'Delay',
     inputs: [
@@ -229,6 +253,21 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
     inputs: [{ name: 'value', defaultValue: 0 }],
     outputs: [],
   },
+  Group: {
+    type: 'Group',
+    inputs: [],
+    outputs: [],
+  },
+  Ins: {
+    type: 'Ins',
+    inputs: [],
+    outputs: [],
+  },
+  Outs: {
+    type: 'Outs',
+    inputs: [],
+    outputs: [],
+  },
   Camera: {
     type: 'Camera',
     inputs: [
@@ -243,14 +282,58 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
   },
 };
 
+const NODE_TYPE_LABELS: Partial<Record<NodeType, string>> = {
+  System: 'Sys ins',
+  Output: 'Sys outs',
+  Group: 'Group',
+  Ins: 'Ins',
+  Outs: 'Outs',
+};
+
 export const NODE_TYPE_LIST = Object.keys(NODE_DEFINITIONS) as NodeType[];
+
+export function getNodeTypeLabel(type: NodeType): string {
+  return NODE_TYPE_LABELS[type] ?? type;
+}
 
 export function getDefinition(type: NodeType): NodeDefinition {
   return NODE_DEFINITIONS[type];
 }
 
+export function getNodeDefinition(node: Pick<PatchNode, 'type' | 'inputs' | 'outputs'>): NodeDefinition {
+  if (node.type === 'Group') {
+    return {
+      type: node.type,
+      inputs: node.inputs ?? [],
+      outputs: node.outputs ?? [],
+    };
+  }
+
+  if (node.type === 'Ins') {
+    return {
+      type: node.type,
+      inputs: [],
+      outputs: node.outputs ?? [],
+    };
+  }
+
+  if (node.type === 'Outs') {
+    return {
+      type: node.type,
+      inputs: node.inputs ?? [],
+      outputs: [],
+    };
+  }
+
+  return getDefinition(node.type);
+}
+
 export function hasInput(type: NodeType, port: string): boolean {
   return NODE_DEFINITIONS[type].inputs.some((input) => input.name === port);
+}
+
+export function nodeHasInput(node: Pick<PatchNode, 'type' | 'inputs' | 'outputs'>, port: string): boolean {
+  return getNodeDefinition(node).inputs.some((input) => input.name === port);
 }
 
 export function acceptsInputLink(type: NodeType, port: string): boolean {
@@ -260,8 +343,19 @@ export function acceptsInputLink(type: NodeType, port: string): boolean {
   ));
 }
 
+export function nodeAcceptsInputLink(node: Pick<PatchNode, 'type' | 'inputs' | 'outputs'>, port: string): boolean {
+  return getNodeDefinition(node).inputs.some((input) => (
+    input.name === port &&
+    input.connectable !== false
+  ));
+}
+
 export function hasOutput(type: NodeType, port: string): boolean {
   return NODE_DEFINITIONS[type].outputs.some((output) => output.name === port);
+}
+
+export function nodeHasOutput(node: Pick<PatchNode, 'type' | 'inputs' | 'outputs'>, port: string): boolean {
+  return getNodeDefinition(node).outputs.some((output) => output.name === port);
 }
 
 export function defaultParamsFor(type: NodeType): Record<string, number> {

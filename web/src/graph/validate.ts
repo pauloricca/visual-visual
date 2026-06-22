@@ -1,19 +1,21 @@
-import { acceptsInputLink, getDefinition, hasInput, hasOutput } from './nodeTypes';
+import { getDefinition, nodeAcceptsInputLink, nodeHasInput, nodeHasOutput } from './nodeTypes';
+import { expandGroups } from './subpatch';
 import type { Patch, PatchLink, PatchNode, ValidationResult } from './types';
 
 export function validatePatch(patch: Patch): ValidationResult {
+  const expandedPatch = expandGroups(patch);
   const errors: string[] = [];
   const warnings: string[] = [];
   const nodes = new Map<string, PatchNode>();
 
-  for (const node of patch.nodes) {
+  for (const node of expandedPatch.nodes) {
     if (nodes.has(node.id)) {
       errors.push(`Duplicate node id "${node.id}".`);
     }
     nodes.set(node.id, node);
   }
 
-  const outputs = patch.nodes.filter((node) => node.type === 'Output');
+  const outputs = expandedPatch.nodes.filter((node) => node.type === 'Output');
   if (outputs.length === 0) {
     errors.push('Patch needs one Output node.');
   }
@@ -22,7 +24,7 @@ export function validatePatch(patch: Patch): ValidationResult {
   }
 
   const inputTargets = new Set<string>();
-  for (const link of patch.links) {
+  for (const link of expandedPatch.links) {
     const source = nodes.get(link.from.node);
     const target = nodes.get(link.to.node);
     if (!source) {
@@ -33,12 +35,12 @@ export function validatePatch(patch: Patch): ValidationResult {
       errors.push(`Link target node "${link.to.node}" does not exist.`);
       continue;
     }
-    if (!hasOutput(source.type, link.from.port)) {
+    if (!nodeHasOutput(source, link.from.port)) {
       errors.push(`Node "${source.id}" has no output port "${link.from.port}".`);
     }
-    if (!hasInput(target.type, link.to.port)) {
+    if (!nodeHasInput(target, link.to.port)) {
       errors.push(`Node "${target.id}" has no input port "${link.to.port}".`);
-    } else if (!acceptsInputLink(target.type, link.to.port)) {
+    } else if (!nodeAcceptsInputLink(target, link.to.port)) {
       errors.push(`Node "${target.id}" input "${link.to.port}" only accepts scalar values.`);
     }
     if (link.mode !== undefined && link.mode !== 'set' && link.mode !== 'add' && link.mode !== 'multiply') {

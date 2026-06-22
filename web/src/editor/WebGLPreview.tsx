@@ -1,11 +1,13 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
-import type { ShaderArg, ShaderDelaySlot, ShaderEnvelopeSlot, ShaderMediaRequirements, ShaderMeterSlot, ShaderScopeSlot } from '../graph/glsl';
+import type { ShaderArg, ShaderBufferSlot, ShaderDelaySlot, ShaderEnvelopeSlot, ShaderMediaRequirements, ShaderMeterSlot, ShaderScopeSlot } from '../graph/glsl';
 
 interface Props {
+  active?: boolean;
   fragmentShader: string;
   feedbackTextureCount?: number;
   shaderArgs?: ShaderArg[];
+  bufferSlots?: ShaderBufferSlot[];
   delaySlots?: ShaderDelaySlot[];
   envelopeSlots?: ShaderEnvelopeSlot[];
   scopeSlots?: ShaderScopeSlot[];
@@ -26,10 +28,12 @@ interface ProgramState {
   uFeedback: Array<WebGLUniformLocation | null>;
   uShaderArgs: Map<string, WebGLUniformLocation | null>;
   uDelaySamplers: Map<string, WebGLUniformLocation | null>;
+  uBufferSamplers: Map<string, WebGLUniformLocation | null>;
   uEnvelopeSamplers: Map<string, WebGLUniformLocation | null>;
   uMicLevel: WebGLUniformLocation | null;
   uCamera: WebGLUniformLocation | null;
   feedbackTextureCount: number;
+  bufferSlots: ShaderBufferSlot[];
   delaySlots: ShaderDelaySlot[];
   envelopeSlots: ShaderEnvelopeSlot[];
   scopeSlots: ShaderScopeSlot[];
@@ -55,6 +59,7 @@ interface StateResources {
   displayTexture: WebGLTexture;
   feedbackTextures: [WebGLTexture[], WebGLTexture[]];
   delayTextures: WebGLTexture[][];
+  bufferTextures: [WebGLTexture[], WebGLTexture[]];
   envelopeTextures: [WebGLTexture[], WebGLTexture[]];
   scopeTextures: WebGLTexture[];
   meterTextures: WebGLTexture[];
@@ -63,11 +68,13 @@ interface StateResources {
   width: number;
   height: number;
   feedbackTextureCount: number;
+  bufferSlotCount: number;
   delaySlotCount: number;
   envelopeSlotCount: number;
   scopeSlotCount: number;
   meterSlotCount: number;
   feedbackReadIndex: 0 | 1;
+  bufferReadIndex: 0 | 1;
   envelopeReadIndex: 0 | 1;
   delayWriteIndex: number;
 }
@@ -97,9 +104,11 @@ const EMPTY_MEDIA_REQUIREMENTS: ShaderMediaRequirements = {
 };
 
 export const WebGLPreview = forwardRef<WebGLPreviewHandle, Props>(function WebGLPreview({
+  active = true,
   fragmentShader,
   feedbackTextureCount = 0,
   shaderArgs = [],
+  bufferSlots = [],
   delaySlots = [],
   envelopeSlots = [],
   scopeSlots = [],
@@ -112,12 +121,16 @@ export const WebGLPreview = forwardRef<WebGLPreviewHandle, Props>(function WebGL
   const vaoRef = useRef<WebGLVertexArrayObject | null>(null);
   const programRef = useRef<ProgramState | null>(null);
   const shaderArgsRef = useRef<ShaderArg[]>(shaderArgs);
+  const bufferSlotsRef = useRef<ShaderBufferSlot[]>(bufferSlots);
   const delaySlotsRef = useRef<ShaderDelaySlot[]>(delaySlots);
   const envelopeSlotsRef = useRef<ShaderEnvelopeSlot[]>(envelopeSlots);
   const scopeSlotsRef = useRef<ShaderScopeSlot[]>(scopeSlots);
   const meterSlotsRef = useRef<ShaderMeterSlot[]>(meterSlots);
   const mediaRequirementsRef = useRef<ShaderMediaRequirements>(mediaRequirements);
   const onFpsChangeRef = useRef<Props['onFpsChange']>(onFpsChange);
+  const activeRef = useRef(active);
+  const animationFrameRef = useRef(0);
+  const startRenderLoopRef = useRef<(() => void) | null>(null);
   const blitProgramRef = useRef<BlitProgramState | null>(null);
   const reduceProgramRef = useRef<ReduceProgramState | null>(null);
   const stateResourcesRef = useRef<StateResources | null>(null);
@@ -196,14 +209,19 @@ export const WebGLPreview = forwardRef<WebGLPreviewHandle, Props>(function WebGL
       uInitialPass: gl.getUniformLocation(reduceProgram, 'u_initial_pass'),
     };
 
-    let animationFrame = 0;
+    let disposed = false;
     const render = () => {
+      if (disposed || !activeRef.current) {
+        animationFrameRef.current = 0;
+        return;
+      }
+
       resizeCanvasToDisplaySize(canvas, gl);
       const program = programRef.current;
       if (program) {
         try {
           gl.bindVertexArray(vaoRef.current);
-          if (program.feedbackTextureCount > 0 || program.delaySlots.length > 0 || program.envelopeSlots.length > 0 || program.scopeSlots.length > 0 || program.meterSlots.length > 0) {
+          if (program.feedbackTextureCount > 0 || program.delaySlots.length > 0 || program.bufferSlots.length > 0 || program.envelopeSlots.length > 0 || program.scopeSlots.length > 0 || program.meterSlots.length > 0) {
             const blitProgramState = blitProgramRef.current;
             const reduceProgramState = reduceProgramRef.current;
             if (!blitProgramState) {
@@ -220,6 +238,7 @@ export const WebGLPreview = forwardRef<WebGLPreviewHandle, Props>(function WebGL
               resources.height !== canvas.height ||
               resources.feedbackTextureCount !== program.feedbackTextureCount ||
               resources.delaySlotCount !== program.delaySlots.length ||
+              resources.bufferSlotCount !== program.bufferSlots.length ||
               resources.envelopeSlotCount !== program.envelopeSlots.length ||
               resources.scopeSlotCount !== program.scopeSlots.length ||
               resources.meterSlotCount !== program.meterSlots.length
@@ -233,6 +252,7 @@ export const WebGLPreview = forwardRef<WebGLPreviewHandle, Props>(function WebGL
                 canvas.height,
                 program.feedbackTextureCount,
                 program.delaySlots.length,
+                program.bufferSlots.length,
                 program.envelopeSlots.length,
                 program.scopeSlots.length,
                 program.meterSlots.length,
@@ -251,6 +271,7 @@ export const WebGLPreview = forwardRef<WebGLPreviewHandle, Props>(function WebGL
               startedAtRef.current,
               shaderArgsRef.current,
               program.delaySlots,
+              program.bufferSlots,
               program.envelopeSlots,
               program.scopeSlots,
               program.meterSlots,
@@ -277,13 +298,22 @@ export const WebGLPreview = forwardRef<WebGLPreviewHandle, Props>(function WebGL
         gl.clear(gl.COLOR_BUFFER_BIT);
       }
       updateFps(fpsSampleRef.current, onFpsChangeRef.current);
-      animationFrame = requestAnimationFrame(render);
+      animationFrameRef.current = requestAnimationFrame(render);
     };
 
-    render();
+    startRenderLoopRef.current = () => {
+      if (animationFrameRef.current || !activeRef.current) return;
+
+      fpsSampleRef.current = { frames: 0, lastTime: performance.now() };
+      animationFrameRef.current = requestAnimationFrame(render);
+    };
+    startRenderLoopRef.current();
 
     return () => {
-      cancelAnimationFrame(animationFrame);
+      disposed = true;
+      cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = 0;
+      startRenderLoopRef.current = null;
       if (programRef.current) {
         gl.deleteProgram(programRef.current.program);
         programRef.current = null;
@@ -311,8 +341,32 @@ export const WebGLPreview = forwardRef<WebGLPreviewHandle, Props>(function WebGL
   }, []);
 
   useEffect(() => {
+    activeRef.current = active;
+    if (active) {
+      startRenderLoopRef.current?.();
+      return;
+    }
+
+    cancelAnimationFrame(animationFrameRef.current);
+    animationFrameRef.current = 0;
+    fpsSampleRef.current = { frames: 0, lastTime: performance.now() };
+    onFpsChangeRef.current?.(0);
+    stopMic(mediaResourcesRef.current);
+    const gl = glRef.current;
+    if (gl) {
+      stopCamera(gl, mediaResourcesRef.current);
+    } else {
+      releaseCameraStream(mediaResourcesRef.current);
+    }
+  }, [active]);
+
+  useEffect(() => {
     shaderArgsRef.current = shaderArgs;
   }, [shaderArgs]);
+
+  useEffect(() => {
+    bufferSlotsRef.current = bufferSlots;
+  }, [bufferSlots]);
 
   useEffect(() => {
     delaySlotsRef.current = delaySlots;
@@ -339,6 +393,11 @@ export const WebGLPreview = forwardRef<WebGLPreviewHandle, Props>(function WebGL
   }, [onFpsChange]);
 
   useEffect(() => {
+    if (!active) {
+      stopMic(mediaResourcesRef.current);
+      return;
+    }
+
     if (mediaRequirements.useMic) {
       void startMic(mediaResourcesRef.current, setError);
     } else {
@@ -348,13 +407,13 @@ export const WebGLPreview = forwardRef<WebGLPreviewHandle, Props>(function WebGL
     return () => {
       stopMic(mediaResourcesRef.current);
     };
-  }, [mediaRequirements.useMic]);
+  }, [active, mediaRequirements.useMic]);
 
   useEffect(() => {
     const gl = glRef.current;
     if (!gl) return;
 
-    if (!mediaRequirements.useCamera) {
+    if (!active || !mediaRequirements.useCamera) {
       stopCamera(gl, mediaResourcesRef.current);
       return;
     }
@@ -384,11 +443,11 @@ export const WebGLPreview = forwardRef<WebGLPreviewHandle, Props>(function WebGL
       window.removeEventListener('pageshow', ensureCameraIsRunning);
       stopCamera(gl, mediaResources);
     };
-  }, [mediaRequirements.useCamera]);
+  }, [active, mediaRequirements.useCamera]);
 
   useEffect(() => {
     const gl = glRef.current;
-    if (!gl || !fragmentShader) return;
+    if (!active || !gl || !fragmentShader) return;
 
     try {
       const nextProgram = createProgram(gl, fragmentShader);
@@ -409,6 +468,10 @@ export const WebGLPreview = forwardRef<WebGLPreviewHandle, Props>(function WebGL
           slot.samplerName,
           gl.getUniformLocation(nextProgram, slot.samplerName),
         ])),
+        uBufferSamplers: new Map(bufferSlotsRef.current.map((slot) => [
+          slot.samplerName,
+          gl.getUniformLocation(nextProgram, slot.samplerName),
+        ])),
         uEnvelopeSamplers: new Map(envelopeSlotsRef.current.map((slot) => [
           slot.samplerName,
           gl.getUniformLocation(nextProgram, slot.samplerName),
@@ -416,6 +479,7 @@ export const WebGLPreview = forwardRef<WebGLPreviewHandle, Props>(function WebGL
         uMicLevel: gl.getUniformLocation(nextProgram, 'u_mic_level'),
         uCamera: gl.getUniformLocation(nextProgram, 'u_camera'),
         feedbackTextureCount,
+        bufferSlots: bufferSlotsRef.current,
         delaySlots: delaySlotsRef.current,
         envelopeSlots: envelopeSlotsRef.current,
         scopeSlots: scopeSlotsRef.current,
@@ -434,7 +498,7 @@ export const WebGLPreview = forwardRef<WebGLPreviewHandle, Props>(function WebGL
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     }
-  }, [feedbackTextureCount, fragmentShader]);
+  }, [active, feedbackTextureCount, fragmentShader]);
 
   return (
     <>
@@ -482,12 +546,14 @@ function renderFeedbackFrame(
   startedAt: number,
   shaderArgs: ShaderArg[],
   delaySlots: ShaderDelaySlot[],
+  bufferSlots: ShaderBufferSlot[],
   envelopeSlots: ShaderEnvelopeSlot[],
   scopeSlots: ShaderScopeSlot[],
   meterSlots: ShaderMeterSlot[],
   mediaResources: MediaResources,
 ): void {
   const feedbackWriteIndex: 0 | 1 = resources.feedbackReadIndex === 0 ? 1 : 0;
+  const bufferWriteIndex: 0 | 1 = resources.bufferReadIndex === 0 ? 1 : 0;
   const envelopeWriteIndex: 0 | 1 = resources.envelopeReadIndex === 0 ? 1 : 0;
   const drawBuffers: number[] = [gl.COLOR_ATTACHMENT0];
 
@@ -518,7 +584,20 @@ function renderFeedbackFrame(
     drawBuffers.push(attachment);
   }
 
-  const envelopeAttachmentOffset = delayAttachmentOffset + delaySlots.length;
+  const bufferAttachmentOffset = delayAttachmentOffset + delaySlots.length;
+  for (let index = 0; index < bufferSlots.length; index += 1) {
+    const attachment = gl.COLOR_ATTACHMENT0 + bufferAttachmentOffset + index;
+    gl.framebufferTexture2D(
+      gl.FRAMEBUFFER,
+      attachment,
+      gl.TEXTURE_2D,
+      resources.bufferTextures[bufferWriteIndex][index],
+      0,
+    );
+    drawBuffers.push(attachment);
+  }
+
+  const envelopeAttachmentOffset = bufferAttachmentOffset + bufferSlots.length;
   for (let index = 0; index < envelopeSlots.length; index += 1) {
     const attachment = gl.COLOR_ATTACHMENT0 + envelopeAttachmentOffset + index;
     gl.framebufferTexture2D(
@@ -583,7 +662,15 @@ function renderFeedbackFrame(
     gl.uniform1i(program.uDelaySamplers.get(delaySlots[index].samplerName) ?? null, textureUnit);
   }
 
-  const envelopeTextureOffset = resources.feedbackTextureCount + delaySlots.length;
+  const bufferTextureOffset = resources.feedbackTextureCount + delaySlots.length;
+  for (let index = 0; index < bufferSlots.length; index += 1) {
+    const textureUnit = bufferTextureOffset + index;
+    gl.activeTexture(gl.TEXTURE0 + textureUnit);
+    gl.bindTexture(gl.TEXTURE_2D, resources.bufferTextures[resources.bufferReadIndex][index]);
+    gl.uniform1i(program.uBufferSamplers.get(bufferSlots[index].samplerName) ?? null, textureUnit);
+  }
+
+  const envelopeTextureOffset = bufferTextureOffset + bufferSlots.length;
   for (let index = 0; index < envelopeSlots.length; index += 1) {
     const textureUnit = envelopeTextureOffset + index;
     gl.activeTexture(gl.TEXTURE0 + textureUnit);
@@ -595,6 +682,7 @@ function renderFeedbackFrame(
   gl.drawArrays(gl.TRIANGLES, 0, 3);
 
   resources.feedbackReadIndex = feedbackWriteIndex;
+  resources.bufferReadIndex = bufferWriteIndex;
   resources.envelopeReadIndex = envelopeWriteIndex;
   resources.delayWriteIndex = (resources.delayWriteIndex + 1) % DELAY_HISTORY_LENGTH;
 
@@ -1032,6 +1120,7 @@ function createStateResources(
   height: number,
   feedbackTextureCount: number,
   delaySlotCount: number,
+  bufferSlotCount: number,
   envelopeSlotCount: number,
   scopeSlotCount: number,
   meterSlotCount: number,
@@ -1043,8 +1132,8 @@ function createStateResources(
   const maxColorAttachments = gl.getParameter(gl.MAX_COLOR_ATTACHMENTS) as number;
   const maxDrawBuffers = gl.getParameter(gl.MAX_DRAW_BUFFERS) as number;
   const maxTextureUnits = gl.getParameter(gl.MAX_TEXTURE_IMAGE_UNITS) as number;
-  const stateOutputCount = feedbackTextureCount + delaySlotCount + envelopeSlotCount + scopeSlotCount + meterSlotCount;
-  const sampledStateCount = feedbackTextureCount + delaySlotCount + envelopeSlotCount;
+  const stateOutputCount = feedbackTextureCount + delaySlotCount + bufferSlotCount + envelopeSlotCount + scopeSlotCount + meterSlotCount;
+  const sampledStateCount = feedbackTextureCount + delaySlotCount + bufferSlotCount + envelopeSlotCount;
   if (stateOutputCount + 1 > Math.min(maxColorAttachments, maxDrawBuffers)) {
     throw new Error(`This GPU can render ${Math.min(maxColorAttachments, maxDrawBuffers) - 1} state textures at once.`);
   }
@@ -1079,6 +1168,13 @@ function createStateResources(
     delayTextures.push(history);
   }
 
+  const bufferTextures: [WebGLTexture[], WebGLTexture[]] = [[], []];
+  for (let ping = 0; ping < 2; ping += 1) {
+    for (let index = 0; index < bufferSlotCount; index += 1) {
+      bufferTextures[ping].push(createTexture(gl, width, height, gl.RG32F, gl.RG, gl.FLOAT));
+    }
+  }
+
   const envelopeTextures: [WebGLTexture[], WebGLTexture[]] = [[], []];
   for (let ping = 0; ping < 2; ping += 1) {
     for (let index = 0; index < envelopeSlotCount; index += 1) {
@@ -1107,6 +1203,7 @@ function createStateResources(
     displayTexture,
     feedbackTextures,
     delayTextures,
+    bufferTextures,
     envelopeTextures,
     scopeTextures,
     meterTextures,
@@ -1115,11 +1212,13 @@ function createStateResources(
     width,
     height,
     feedbackTextureCount,
+    bufferSlotCount,
     delaySlotCount,
     envelopeSlotCount,
     scopeSlotCount,
     meterSlotCount,
     feedbackReadIndex: 0,
+    bufferReadIndex: 0,
     envelopeReadIndex: 0,
     delayWriteIndex: 0,
   };
@@ -1159,6 +1258,11 @@ function disposeStateResources(gl: WebGL2RenderingContext, resources: StateResou
   }
   for (const history of resources.delayTextures) {
     for (const texture of history) {
+      gl.deleteTexture(texture);
+    }
+  }
+  for (const textureSet of resources.bufferTextures) {
+    for (const texture of textureSet) {
       gl.deleteTexture(texture);
     }
   }

@@ -1,4 +1,5 @@
-import { getDefinition } from './nodeTypes';
+import { getNodeDefinition } from './nodeTypes';
+import { expandGroups } from './subpatch';
 import type { Patch, PatchLink, PatchNode } from './types';
 import { findFeedbackLinks, incomingLinksByInput, linkKey, validatePatch } from './validate';
 
@@ -10,6 +11,7 @@ export interface CompileResult {
   warnings: string[];
   feedbackLinkIds: string[];
   feedbackTextureCount: number;
+  bufferSlots: ShaderBufferSlot[];
   delaySlots: ShaderDelaySlot[];
   envelopeSlots: ShaderEnvelopeSlot[];
   scopeSlots: ShaderScopeSlot[];
@@ -28,6 +30,11 @@ export interface ShaderDelaySlot {
   nodeId: string;
   samplerName: string;
   frameArgName: string;
+}
+
+export interface ShaderBufferSlot {
+  nodeId: string;
+  samplerName: string;
 }
 
 export interface ShaderEnvelopeSlot {
@@ -59,8 +66,9 @@ export function compilePatchToGlsl(
   target: GlslTarget = 'desktop',
   options: CompileOptions = {},
 ): CompileResult {
+  const expandedPatch = expandGroups(patch);
   const enableScopes = options.enableScopes ?? true;
-  const validation = validatePatch(patch);
+  const validation = validatePatch(expandedPatch);
   if (!validation.ok) {
     return {
       ok: false,
@@ -70,6 +78,7 @@ export function compilePatchToGlsl(
       warnings: validation.warnings,
       feedbackLinkIds: [],
       feedbackTextureCount: 0,
+      bufferSlots: [],
       delaySlots: [],
       envelopeSlots: [],
       scopeSlots: [],
@@ -78,10 +87,10 @@ export function compilePatchToGlsl(
     };
   }
 
-  const nodes = new Map(patch.nodes.map((node) => [node.id, node]));
-  const incoming = incomingLinksByInput(patch.links);
-  const shaderArgs = collectShaderArgs(patch, incoming);
-  const feedbackSlots = findFeedbackLinks(patch).map((link, index): FeedbackSlot => ({
+  const nodes = new Map(expandedPatch.nodes.map((node) => [node.id, node]));
+  const incoming = incomingLinksByInput(expandedPatch.links);
+  const shaderArgs = collectShaderArgs(expandedPatch, incoming);
+  const feedbackSlots = findFeedbackLinks(expandedPatch).map((link, index): FeedbackSlot => ({
     link,
     linkId: linkKey(link),
     textureIndex: Math.floor(index / 4),
@@ -91,7 +100,7 @@ export function compilePatchToGlsl(
   const feedbackTextureCount = Math.ceil(feedbackSlots.length / 4);
   let delaySlots: ShaderDelaySlot[] = [];
   try {
-    delaySlots = collectDelaySlots(patch, shaderArgs);
+    delaySlots = collectDelaySlots(expandedPatch, shaderArgs);
   } catch (error) {
     return {
       ok: false,
@@ -101,6 +110,7 @@ export function compilePatchToGlsl(
       warnings: validation.warnings,
       feedbackLinkIds: feedbackSlots.map((slot) => slot.linkId),
       feedbackTextureCount,
+      bufferSlots: [],
       delaySlots: [],
       envelopeSlots: [],
       scopeSlots: [],
@@ -109,11 +119,13 @@ export function compilePatchToGlsl(
     };
   }
   const delayByNodeId = new Map(delaySlots.map((slot) => [slot.nodeId, slot]));
-  const envelopeSlots = collectEnvelopeSlots(patch);
+  const bufferSlots = collectBufferSlots(expandedPatch);
+  const bufferByNodeId = new Map(bufferSlots.map((slot) => [slot.nodeId, slot]));
+  const envelopeSlots = collectEnvelopeSlots(expandedPatch);
   const envelopeByNodeId = new Map(envelopeSlots.map((slot) => [slot.nodeId, slot]));
-  const scopeSlots = enableScopes ? collectScopeSlots(patch) : [];
-  const meterSlots = enableScopes ? collectMeterSlots(patch, incoming) : [];
-  const output = patch.nodes.find((node) => node.type === 'Output');
+  const scopeSlots = enableScopes ? collectScopeSlots(expandedPatch) : [];
+  const meterSlots = enableScopes ? collectMeterSlots(expandedPatch, incoming) : [];
+  const output = expandedPatch.nodes.find((node) => node.type === 'Output');
   if (!output) {
     return {
       ok: false,
@@ -123,6 +135,7 @@ export function compilePatchToGlsl(
       warnings: validation.warnings,
       feedbackLinkIds: feedbackSlots.map((slot) => slot.linkId),
       feedbackTextureCount,
+      bufferSlots,
       delaySlots,
       envelopeSlots,
       scopeSlots,
@@ -145,6 +158,7 @@ export function compilePatchToGlsl(
       .filter((arg) => arg.port === 'weight')
       .map((arg) => [arg.nodeId, arg.name])),
     delayByNodeId,
+    bufferByNodeId,
     envelopeByNodeId,
     media: emptyMediaRequirements(),
   };
@@ -162,6 +176,13 @@ export function compilePatchToGlsl(
         throw new Error(`Delay node "${slot.nodeId}" does not exist.`);
       }
       return resolveInput(node, 'value', context);
+    });
+    const bufferExpressions = bufferSlots.map((slot) => {
+      const node = nodes.get(slot.nodeId);
+      if (!node) {
+        throw new Error(`Buffer node "${slot.nodeId}" does not exist.`);
+      }
+      return `vec2(${resolveInput(node, 'inX', context)}, ${resolveInput(node, 'inY', context)})`;
     });
     const envelopeExpressions = envelopeSlots.map((slot) => resolveOutput(slot.nodeId, 'value', context));
     const scopeExpressions = scopeSlots.map((slot) => {
@@ -194,6 +215,8 @@ export function compilePatchToGlsl(
         context.shaderArgs,
         delaySlots,
         delayExpressions,
+        bufferSlots,
+        bufferExpressions,
         envelopeSlots,
         envelopeExpressions,
         scopeSlots,
@@ -207,6 +230,7 @@ export function compilePatchToGlsl(
       warnings: validation.warnings,
       feedbackLinkIds: feedbackSlots.map((slot) => slot.linkId),
       feedbackTextureCount,
+      bufferSlots,
       delaySlots,
       envelopeSlots,
       scopeSlots,
@@ -222,6 +246,7 @@ export function compilePatchToGlsl(
       warnings: validation.warnings,
       feedbackLinkIds: feedbackSlots.map((slot) => slot.linkId),
       feedbackTextureCount,
+      bufferSlots,
       delaySlots,
       envelopeSlots,
       scopeSlots,
@@ -243,6 +268,7 @@ interface CompileContext {
   shaderArgNames: Map<string, string>;
   edgeWeightArgNames: Map<string, string>;
   delayByNodeId: Map<string, ShaderDelaySlot>;
+  bufferByNodeId: Map<string, ShaderBufferSlot>;
   envelopeByNodeId: Map<string, ShaderEnvelopeSlot>;
   media: ShaderMediaRequirements;
 }
@@ -428,6 +454,8 @@ function emitOutput(node: PatchNode, port: string, context: CompileContext): str
       return `(1.0 - abs(${oscillatorPhase(node, context)} * 2.0 - 1.0))`;
     case 'Polar':
       return emitPolar(node, port, context);
+    case 'toPolar':
+      return emitToPolar(node, port, context);
     case 'HSV':
       return emitHsv(node, port, context);
     case 'Gate':
@@ -451,6 +479,8 @@ function emitOutput(node: PatchNode, port: string, context: CompileContext): str
       return emitCamera(node, port, context);
     case 'Envelope':
       return emitEnvelope(node, port, context);
+    case 'Buffer':
+      return emitBuffer(node, port, context);
     case 'Delay': {
       assertPort(node, port, 'value');
       const slot = context.delayByNodeId.get(node.id);
@@ -491,6 +521,20 @@ function emitPolar(node: PatchNode, port: string, context: CompileContext): stri
       return `(${radius} * sin(${angle}))`;
     default:
       throw new Error(`Polar.${port} is not supported.`);
+  }
+}
+
+function emitToPolar(node: PatchNode, port: string, context: CompileContext): string {
+  const x = input(node, 'x', context);
+  const y = input(node, 'y', context);
+
+  switch (port) {
+    case 'radius':
+      return `length(vec2(${x}, ${y}))`;
+    case 'angle':
+      return `atan(${y}, ${x})`;
+    default:
+      throw new Error(`toPolar.${port} is not supported.`);
   }
 }
 
@@ -542,6 +586,20 @@ function emitEnvelope(node: PatchNode, port: string, context: CompileContext): s
   const release = input(node, 'release', context);
   const frames = `((${current} > ${previous}) ? ${attack} : ${release})`;
   return `mix(${previous}, ${current}, clamp(1.0 / max(${frames}, 1.0), 0.0, 1.0))`;
+}
+
+function emitBuffer(node: PatchNode, port: string, context: CompileContext): string {
+  const channel = { x: 'r', y: 'g' }[port];
+  if (!channel) {
+    throw new Error(`Buffer.${port} is not supported.`);
+  }
+
+  const slot = context.bufferByNodeId.get(node.id);
+  if (!slot) {
+    throw new Error(`Buffer node "${node.id}" is missing a hidden buffer.`);
+  }
+
+  return `texture(${slot.samplerName}, clamp(vec2(${input(node, 'outX', context)}, ${input(node, 'outY', context)}), vec2(0.0), vec2(1.0))).${channel}`;
 }
 
 function emitCamera(node: PatchNode, port: string, context: CompileContext): string {
@@ -614,6 +672,8 @@ function buildShader(
   shaderArgs: ShaderArg[],
   delaySlots: ShaderDelaySlot[],
   delayExpressions: string[],
+  bufferSlots: ShaderBufferSlot[],
+  bufferExpressions: string[],
   envelopeSlots: ShaderEnvelopeSlot[],
   envelopeExpressions: string[],
   scopeSlots: ShaderScopeSlot[],
@@ -623,7 +683,7 @@ function buildShader(
   media: ShaderMediaRequirements,
 ): string {
   const hasFeedback = feedbackTextureCount > 0;
-  const hasStateOutputs = hasFeedback || delaySlots.length > 0 || envelopeSlots.length > 0 || scopeSlots.length > 0 || meterSlots.length > 0;
+  const hasStateOutputs = hasFeedback || delaySlots.length > 0 || bufferSlots.length > 0 || envelopeSlots.length > 0 || scopeSlots.length > 0 || meterSlots.length > 0;
   const fragmentOutput = hasStateOutputs ? 'layout(location = 0) out vec4 fragColor;' : 'out vec4 fragColor;';
   const feedbackOutputs = Array.from({ length: feedbackTextureCount }, (_, index) =>
     `layout(location = ${index + 1}) out vec4 feedbackColor${index};`,
@@ -631,7 +691,11 @@ function buildShader(
   const delayOutputs = delaySlots.map((slot, index) =>
     `layout(location = ${feedbackTextureCount + index + 1}) out vec4 delayColor${index};`,
   ).join('\n');
-  const envelopeOutputOffset = feedbackTextureCount + delaySlots.length + 1;
+  const bufferOutputOffset = feedbackTextureCount + delaySlots.length + 1;
+  const bufferOutputs = bufferSlots.map((slot, index) =>
+    `layout(location = ${bufferOutputOffset + index}) out vec2 bufferColor${index};`,
+  ).join('\n');
+  const envelopeOutputOffset = bufferOutputOffset + bufferSlots.length;
   const envelopeOutputs = envelopeSlots.map((slot, index) =>
     `layout(location = ${envelopeOutputOffset + index}) out vec4 envelopeColor${index};`,
   ).join('\n');
@@ -651,6 +715,7 @@ precision highp int;
 ${fragmentOutput}
 ${feedbackOutputs}
 ${delayOutputs}
+${bufferOutputs}
 ${envelopeOutputs}
 ${scopeOutputs}
 ${meterOutputs}`
@@ -658,6 +723,7 @@ ${meterOutputs}`
 ${fragmentOutput}
 ${feedbackOutputs}
 ${delayOutputs}
+${bufferOutputs}
 ${envelopeOutputs}
 ${scopeOutputs}
 ${meterOutputs}
@@ -666,6 +732,9 @@ ${meterOutputs}
     `uniform sampler2D u_feedback${index};`,
   ).join('\n');
   const delayUniforms = delaySlots
+    .map((slot) => `uniform sampler2D ${slot.samplerName};`)
+    .join('\n');
+  const bufferUniforms = bufferSlots
     .map((slot) => `uniform sampler2D ${slot.samplerName};`)
     .join('\n');
   const envelopeUniforms = envelopeSlots
@@ -699,6 +768,8 @@ ${shaderArgUniforms}`
   }).join('\n\n');
   const delayAssignments = delaySlots.map((slot, index) => `  // delay ${formatCommentText(slot.nodeId)}
   delayColor${index} = vec4(${delayExpressions[index] ?? '0.0'}, 0.0, 0.0, 1.0);`).join('\n\n');
+  const bufferAssignments = bufferSlots.map((slot, index) => `  // buffer ${formatCommentText(slot.nodeId)}
+  bufferColor${index} = ${bufferExpressions[index] ?? 'vec2(0.0)'};`).join('\n\n');
   const envelopeAssignments = envelopeSlots.map((slot, index) => `  // envelope ${formatCommentText(slot.nodeId)}
   envelopeColor${index} = vec4(${envelopeExpressions[index] ?? '0.0'}, 0.0, 0.0, 1.0);`).join('\n\n');
   const scopeAssignments = scopeSlots.map((slot, index) => `  // scope ${formatCommentText(slot.nodeId)}
@@ -713,6 +784,7 @@ uniform int u_frame;
 ${shaderArgBlock}
 ${feedbackUniforms}
 ${delayUniforms}
+${bufferUniforms}
 ${envelopeUniforms}
 ${mediaUniforms}
 
@@ -884,6 +956,7 @@ ${intermediateStatements ? `\n${intermediateStatements}\n` : ''}
   fragColor = vec4(r, g, b, 1.0);
 ${feedbackAssignments ? `\n${feedbackAssignments}` : ''}
 ${delayAssignments ? `\n${delayAssignments}` : ''}
+${bufferAssignments ? `\n${bufferAssignments}` : ''}
 ${envelopeAssignments ? `\n${envelopeAssignments}` : ''}
 ${scopeAssignments ? `\n${scopeAssignments}` : ''}
 ${meterAssignments ? `\n${meterAssignments}` : ''}
@@ -908,7 +981,7 @@ function collectShaderArgs(patch: Patch, incoming: Map<string, PatchLink[]>): Sh
   const args: ShaderArg[] = [];
 
   for (const node of patch.nodes) {
-    const definition = getDefinition(node.type);
+    const definition = getNodeDefinition(node);
     for (const input of definition.inputs) {
       const inputLinks = incoming.get(`${node.id}.${input.name}`) ?? [];
       if (node.type === 'Meter' && input.name === 'value' && inputLinks.length === 0) continue;
@@ -951,6 +1024,15 @@ function collectDelaySlots(patch: Patch, shaderArgs: ShaderArg[]): ShaderDelaySl
         frameArgName: frameArg.name,
       };
     });
+}
+
+function collectBufferSlots(patch: Patch): ShaderBufferSlot[] {
+  return patch.nodes
+    .filter((node) => node.type === 'Buffer')
+    .map((node) => ({
+      nodeId: node.id,
+      samplerName: `u_buffer_${toGlslIdentifier(node.id)}`,
+    }));
 }
 
 function collectEnvelopeSlots(patch: Patch): ShaderEnvelopeSlot[] {
