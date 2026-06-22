@@ -597,13 +597,31 @@ select:hover {
   white-space: nowrap;
 }
 
+.port-name-label {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
 .port-name-label-editable {
-  cursor: text;
+  cursor: grab;
 }
 
 .port-name-label-editable:focus {
   outline: 1px solid #fff;
   outline-offset: 2px;
+}
+
+.port-name-label-draggable:active {
+  cursor: grabbing;
+}
+
+.port-name-label-drag-target {
+  outline: 1px dashed rgba(255, 255, 255, 0.85);
+  outline-offset: 2px;
+}
+
+.port-name-label-drag-source {
+  opacity: 0.58;
 }
 
 .port-name-editor {
@@ -616,32 +634,6 @@ select:hover {
   color: #fff;
   font: inherit;
   line-height: 20px;
-}
-
-.port-reorder-controls {
-  display: inline-flex;
-  gap: 2px;
-  flex: 0 0 auto;
-}
-
-.port-reorder-button {
-  width: 18px;
-  height: 18px;
-  padding: 0;
-  border: 1px solid #fff;
-  border-radius: 0;
-  background: transparent;
-  color: #fff;
-  cursor: pointer;
-  font: inherit;
-  font-size: 10px;
-  line-height: 16px;
-}
-
-.port-reorder-button:disabled {
-  border-color: rgba(255, 255, 255, 0.35);
-  color: rgba(255, 255, 255, 0.35);
-  cursor: default;
 }
 
 .shader-handle {

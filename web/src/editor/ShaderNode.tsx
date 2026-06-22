@@ -1,5 +1,13 @@
 import { Handle, Position, useUpdateNodeInternals, type NodeProps } from '@xyflow/react';
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from 'react';
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent,
+  type PointerEvent,
+} from 'react';
 import { getNodeDefinition, getNodeTypeLabel, NODE_TYPE_LIST } from '../graph/nodeTypes';
 import type { NodeType, PatchNode } from '../graph/types';
 import type { ShaderFlowNode, ShaderNodeData } from './flowPatch';
@@ -7,6 +15,12 @@ import type { ShaderFlowNode, ShaderNodeData } from './flowPatch';
 export function ShaderNode({ data, selected, dragging }: NodeProps<ShaderFlowNode>) {
   const node = data.patchNode;
   const updateNodeInternals = useUpdateNodeInternals();
+  const draggedPortRef = useRef<{ side: 'input' | 'output'; port: string; pointerId: number } | null>(null);
+  const dragStartRef = useRef<{ x: number; y: number } | null>(null);
+  const inputPortRowsRef = useRef<Record<string, HTMLDivElement | null>>({});
+  const outputPortRowsRef = useRef<Record<string, HTMLDivElement | null>>({});
+  const [dragSource, setDragSource] = useState<{ side: 'input' | 'output'; port: string } | null>(null);
+  const [dragTarget, setDragTarget] = useState<{ side: 'input' | 'output'; port: string } | null>(null);
   const definition = node.type ? getNodeDefinition(node as PatchNode) : null;
   const isScope = node.type === 'Scope';
   const isMeter = node.type === 'Meter';
@@ -33,6 +47,104 @@ export function ShaderNode({ data, selected, dragging }: NodeProps<ShaderFlowNod
     const animationFrame = requestAnimationFrame(() => updateNodeInternals(node.id));
     return () => cancelAnimationFrame(animationFrame);
   }, [hasBodyOutputs, inputLabelWidth, node.id, outputCount, outputLabelWidth, updateNodeInternals]);
+
+  function moveDraggedPortToTarget(side: 'input' | 'output', draggedPort: string, targetPort: string, portOrder: string[]) {
+    if (draggedPort === targetPort) return;
+
+    const fromIndex = portOrder.indexOf(draggedPort);
+    const toIndex = portOrder.indexOf(targetPort);
+    if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) return;
+
+    const direction: -1 | 1 = fromIndex < toIndex ? 1 : -1;
+    const steps = Math.abs(toIndex - fromIndex);
+    for (let step = 0; step < steps; step += 1) {
+      data.onPortMove(node.id, side, draggedPort, direction);
+    }
+  }
+
+  useEffect(() => {
+    function handlePointerMove(event: globalThis.PointerEvent) {
+      const draggedPort = draggedPortRef.current;
+      if (!draggedPort || draggedPort.pointerId !== event.pointerId || !definition) return;
+
+      const dragStart = dragStartRef.current;
+      if (!dragStart) return;
+
+      const moved = Math.hypot(event.clientX - dragStart.x, event.clientY - dragStart.y) > 3;
+      if (!moved) return;
+
+      event.preventDefault();
+      const side = draggedPort.side;
+      const portOrder = side === 'input'
+        ? definition.inputs.map((port) => port.name)
+        : definition.outputs.map((port) => port.name);
+      const rows = side === 'input' ? inputPortRowsRef.current : outputPortRowsRef.current;
+
+      const targets = portOrder.flatMap((port) => {
+        const row = rows[port];
+        if (!row) return [];
+        const rect = row.getBoundingClientRect();
+        return [{
+          port,
+          centerY: rect.top + rect.height / 2,
+        }];
+      });
+
+      if (targets.length === 0) return;
+
+      const targetPort = targets.reduce((best, current) => {
+        const bestDistance = Math.abs(event.clientY - best.centerY);
+        const currentDistance = Math.abs(event.clientY - current.centerY);
+        return currentDistance < bestDistance ? current : best;
+      }).port;
+
+      setDragSource((current) => current ?? { side, port: draggedPort.port });
+      setDragTarget({ side, port: targetPort });
+      moveDraggedPortToTarget(side, draggedPort.port, targetPort, portOrder);
+    }
+
+    function stopDragging(pointerId: number) {
+      if (!draggedPortRef.current || draggedPortRef.current.pointerId !== pointerId) return;
+
+      draggedPortRef.current = null;
+      dragStartRef.current = null;
+      setDragSource(null);
+      setDragTarget(null);
+    }
+
+    function handlePointerUp(event: globalThis.PointerEvent) {
+      stopDragging(event.pointerId);
+    }
+
+    function handlePointerCancel(event: globalThis.PointerEvent) {
+      stopDragging(event.pointerId);
+    }
+
+    window.addEventListener('pointermove', handlePointerMove, { passive: false });
+    window.addEventListener('pointerup', handlePointerUp);
+    window.addEventListener('pointercancel', handlePointerCancel);
+
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+      window.removeEventListener('pointercancel', handlePointerCancel);
+    };
+  }, [definition, node.id]);
+
+  function handlePortPointerDown(
+    event: PointerEvent<HTMLSpanElement>,
+    side: 'input' | 'output',
+    port: string,
+  ) {
+    if (event.button !== 0) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    draggedPortRef.current = { side, port, pointerId: event.pointerId };
+    dragStartRef.current = { x: event.clientX, y: event.clientY };
+    setDragSource(null);
+    setDragTarget(null);
+  }
 
   return (
     <div className={className}>
@@ -83,10 +195,13 @@ export function ShaderNode({ data, selected, dragging }: NodeProps<ShaderFlowNod
           !hasBodyOutputs ? 'shader-node-body-no-outputs' : '',
         ].filter(Boolean).join(' ')}>
           <div className="shader-ports shader-inputs" style={inputStyle}>
-            {definition.inputs.map((input, index) => (
+            {definition.inputs.map((input) => (
             <div
               className="shader-port shader-port-input"
               key={input.name}
+              ref={(element) => {
+                inputPortRowsRef.current[input.name] = element;
+              }}
               onDoubleClick={(event) => {
                 if (input.connectable === false) return;
                 event.stopPropagation();
@@ -108,15 +223,15 @@ export function ShaderNode({ data, selected, dragging }: NodeProps<ShaderFlowNod
               <PortNameLabel
                 name={input.name}
                 editable={canRenameInputs}
+                draggable={false}
+                activeDragTarget={dragTarget?.side === 'input' && dragTarget.port === input.name}
+                activeDragSource={dragSource?.side === 'input' && dragSource.port === input.name}
+                onPointerDown={(event) => {
+                  if (!canRenameInputs) return;
+                  handlePortPointerDown(event, 'input', input.name);
+                }}
                 onChange={(nextName) => data.onPortNameChange(node.id, 'input', input.name, nextName)}
               />
-              {canRenameInputs ? (
-                <PortReorderControls
-                  canMoveUp={index > 0}
-                  canMoveDown={index < definition.inputs.length - 1}
-                  onMove={(direction) => data.onPortMove(node.id, 'input', input.name, direction)}
-                />
-              ) : null}
               <NumericScrubber
                 value={node.params[input.name] ?? input.defaultValue ?? 0}
                 min={input.min}
@@ -129,10 +244,13 @@ export function ShaderNode({ data, selected, dragging }: NodeProps<ShaderFlowNod
           </div>
           {hasBodyOutputs ? (
             <div className="shader-ports shader-outputs">
-              {definition.outputs.map((output, index) => (
+              {definition.outputs.map((output) => (
               <div
                 className="shader-port shader-port-output"
                 key={output.name}
+                ref={(element) => {
+                  outputPortRowsRef.current[output.name] = element;
+                }}
                 onDoubleClick={(event) => {
                   event.stopPropagation();
                   data.onPortDoubleClick(node.id, 'output', output.name);
@@ -141,15 +259,15 @@ export function ShaderNode({ data, selected, dragging }: NodeProps<ShaderFlowNod
                 <PortNameLabel
                   name={output.name}
                   editable={canRenameOutputs}
+                  draggable={false}
+                  activeDragTarget={dragTarget?.side === 'output' && dragTarget.port === output.name}
+                  activeDragSource={dragSource?.side === 'output' && dragSource.port === output.name}
+                  onPointerDown={(event) => {
+                    if (!canRenameOutputs) return;
+                    handlePortPointerDown(event, 'output', output.name);
+                  }}
                   onChange={(nextName) => data.onPortNameChange(node.id, 'output', output.name, nextName)}
                 />
-                {canRenameOutputs ? (
-                  <PortReorderControls
-                    canMoveUp={index > 0}
-                    canMoveDown={index < definition.outputs.length - 1}
-                    onMove={(direction) => data.onPortMove(node.id, 'output', output.name, direction)}
-                  />
-                ) : null}
                 <Handle
                   id={`out:${output.name}`}
                   type="source"
@@ -195,50 +313,6 @@ export function ShaderNode({ data, selected, dragging }: NodeProps<ShaderFlowNod
   );
 }
 
-interface PortReorderControlsProps {
-  canMoveUp: boolean;
-  canMoveDown: boolean;
-  onMove: (direction: -1 | 1) => void;
-}
-
-function PortReorderControls({ canMoveUp, canMoveDown, onMove }: PortReorderControlsProps) {
-  return (
-    <div
-      className="port-reorder-controls nodrag nopan"
-      onDoubleClick={(event) => event.stopPropagation()}
-      onMouseDown={(event) => event.stopPropagation()}
-      onPointerDown={(event) => event.stopPropagation()}
-    >
-      <button
-        type="button"
-        className="port-reorder-button"
-        title="Move port up"
-        disabled={!canMoveUp}
-        onClick={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          onMove(-1);
-        }}
-      >
-        ^
-      </button>
-      <button
-        type="button"
-        className="port-reorder-button"
-        title="Move port down"
-        disabled={!canMoveDown}
-        onClick={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          onMove(1);
-        }}
-      >
-        v
-      </button>
-    </div>
-  );
-}
-
 interface NodeTypePickerProps {
   nodeType: NodeType | null;
   displayLabel?: string;
@@ -251,10 +325,22 @@ interface NodeTypePickerProps {
 interface PortNameLabelProps {
   name: string;
   editable: boolean;
+  draggable?: boolean;
+  activeDragTarget?: boolean;
+  activeDragSource?: boolean;
+  onPointerDown?: (event: PointerEvent<HTMLSpanElement>) => void;
   onChange: (nextName: string) => void;
 }
 
-function PortNameLabel({ name, editable, onChange }: PortNameLabelProps) {
+function PortNameLabel({
+  name,
+  editable,
+  draggable = false,
+  activeDragTarget = false,
+  activeDragSource = false,
+  onPointerDown,
+  onChange,
+}: PortNameLabelProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(name);
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -312,22 +398,23 @@ function PortNameLabel({ name, editable, onChange }: PortNameLabelProps) {
 
   return (
     <span
-      className={editable ? 'port-name-label port-name-label-editable' : 'port-name-label'}
-      tabIndex={editable ? 0 : undefined}
-      title={editable ? 'Rename port' : undefined}
+      className={[
+        'port-name-label',
+        editable ? 'port-name-label-editable' : '',
+        draggable ? 'port-name-label-draggable nodrag nopan' : '',
+        activeDragTarget ? 'port-name-label-drag-target' : '',
+        activeDragSource ? 'port-name-label-drag-source' : '',
+      ].filter(Boolean).join(' ')}
+      draggable={draggable}
+      title={editable ? 'Drag to reorder. Double-click to rename' : undefined}
+        onPointerDown={(event) => {
+          onPointerDown?.(event);
+        }}
       onDoubleClick={(event) => {
         if (!editable) return;
         event.preventDefault();
         event.stopPropagation();
         setEditing(true);
-      }}
-      onKeyDown={(event) => {
-        if (!editable) return;
-        event.stopPropagation();
-        if (event.key === 'Enter') {
-          event.preventDefault();
-          setEditing(true);
-        }
       }}
     >
       {name}
