@@ -536,33 +536,35 @@ function PortNameLabel({
 }
 
 function NodeTypePicker({ nodeType, displayLabel, open, onOpen, onClose, onChange }: NodeTypePickerProps) {
-  const [query, setQuery] = useState<string>(nodeType ? getNodeTypeLabel(nodeType) : '');
+  const nodeTypeLabel = nodeType ? getNodeTypeLabel(nodeType) : 'type';
+  const pickerLabel = displayLabel ?? nodeTypeLabel;
+  const [query, setQuery] = useState<string>(nodeType ? pickerLabel : '');
   const [highlightedIndex, setHighlightedIndex] = useState(0);
   const [dragIntent, setDragIntent] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const pointerStartRef = useRef<{ x: number; y: number } | null>(null);
+  const searchQuery = displayLabel && query.trim() === pickerLabel
+    ? nodeTypeLabel
+    : query;
   const options = useMemo(() => NODE_TYPE_LIST.filter((type) => {
-    const normalizedQuery = query.trim().toLowerCase();
+    const normalizedQuery = searchQuery.trim().toLowerCase();
     return (
       type.toLowerCase().includes(normalizedQuery) ||
       getNodeTypeLabel(type).toLowerCase().includes(normalizedQuery)
     );
-  }), [query]);
-  const nodeTypeLabel = nodeType ? getNodeTypeLabel(nodeType) : 'type';
-  const pickerLabel = displayLabel ?? nodeTypeLabel;
-
+  }), [searchQuery]);
   useEffect(() => {
     if (!open) {
-      setQuery(nodeType ? getNodeTypeLabel(nodeType) : '');
+      setQuery(nodeType ? pickerLabel : '');
       setHighlightedIndex(0);
     }
-  }, [nodeType, open]);
+  }, [nodeType, open, pickerLabel]);
 
   useEffect(() => {
     if (open) {
-      setQuery(nodeType ? getNodeTypeLabel(nodeType) : '');
+      setQuery(nodeType ? pickerLabel : '');
       setHighlightedIndex(0);
       const focusAndSelect = () => {
         inputRef.current?.focus({ preventScroll: true });
@@ -578,7 +580,7 @@ function NodeTypePicker({ nodeType, displayLabel, open, onOpen, onClose, onChang
         window.clearTimeout(secondTimeout);
       };
     }
-  }, [nodeType, open]);
+  }, [nodeType, open, pickerLabel]);
 
   useEffect(() => {
     if (!open) return;
