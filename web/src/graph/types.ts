@@ -1,6 +1,7 @@
 export type NodeType =
   | 'System'
   | 'Output'
+  | 'Expression'
   | 'Constant'
   | 'Add'
   | 'Subtract'
@@ -11,6 +12,9 @@ export type NodeType =
   | 'Sin'
   | 'Cos'
   | 'Tan'
+  | 'sinh'
+  | 'cosh'
+  | 'tanh'
   | 'Atan'
   | 'Abs'
   | 'Floor'
@@ -31,6 +35,16 @@ export type NodeType =
   | 'HSV'
   | 'Gate'
   | 'Rotate'
+  | 'complexMul'
+  | 'complexDiv'
+  | 'complexPow'
+  | 'mobius'
+  | 'circleInvert'
+  | 'polarRepeat'
+  | 'logPolar'
+  | 'domainWarp'
+  | 'foldSymmetry'
+  | 'juliaOrbitTrap'
   | 'Quantise'
   | 'Distance'
   | 'Noise'
@@ -57,6 +71,7 @@ export interface PatchNode {
   type: NodeType;
   subpatchName?: string;
   subpatchCloneId?: string;
+  expression?: string;
   params: Record<string, number>;
   position?: Vec2;
   inputs?: PortDefinition[];

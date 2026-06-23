@@ -25,6 +25,11 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
       { name: 'b' },
     ],
   },
+  Expression: {
+    type: 'Expression',
+    inputs: [],
+    outputs: [{ name: 'value' }],
+  },
   Constant: {
     type: 'Constant',
     inputs: [{ name: 'value', defaultValue: 1 }],
@@ -39,6 +44,9 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
   Sin: unary('Sin'),
   Cos: unary('Cos'),
   Tan: unary('Tan'),
+  sinh: unary('sinh'),
+  cosh: unary('cosh'),
+  tanh: unary('tanh'),
   Atan: unary('Atan'),
   Abs: unary('Abs'),
   Floor: unary('Floor'),
@@ -158,6 +166,181 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
     outputs: [
       { name: 'x' },
       { name: 'y' },
+    ],
+  },
+  complexMul: {
+    type: 'complexMul',
+    inputs: [
+      { name: 'ax', defaultValue: 0 },
+      { name: 'ay', defaultValue: 0 },
+      { name: 'bx', defaultValue: 1 },
+      { name: 'by', defaultValue: 0 },
+    ],
+    outputs: [
+      { name: 'outX' },
+      { name: 'outY' },
+      { name: 'distance' },
+      { name: 'angle' },
+    ],
+  },
+  complexDiv: {
+    type: 'complexDiv',
+    inputs: [
+      { name: 'ax', defaultValue: 0 },
+      { name: 'ay', defaultValue: 0 },
+      { name: 'bx', defaultValue: 1 },
+      { name: 'by', defaultValue: 0 },
+    ],
+    outputs: [
+      { name: 'outX' },
+      { name: 'outY' },
+      { name: 'distance' },
+      { name: 'angle' },
+      { name: 'mask' },
+    ],
+  },
+  complexPow: {
+    type: 'complexPow',
+    inputs: [
+      { name: 'zx', defaultValue: 0 },
+      { name: 'zy', defaultValue: 0 },
+      { name: 'power', defaultValue: 2 },
+    ],
+    outputs: [
+      { name: 'outX' },
+      { name: 'outY' },
+      { name: 'distance' },
+      { name: 'angle' },
+    ],
+  },
+  mobius: {
+    type: 'mobius',
+    inputs: [
+      { name: 'zx', defaultValue: 0 },
+      { name: 'zy', defaultValue: 0 },
+      { name: 'ax', defaultValue: 1 },
+      { name: 'ay', defaultValue: 0 },
+      { name: 'bx', defaultValue: 0 },
+      { name: 'by', defaultValue: 0 },
+      { name: 'cx', defaultValue: 0 },
+      { name: 'cy', defaultValue: 0 },
+      { name: 'dx', defaultValue: 1 },
+      { name: 'dy', defaultValue: 0 },
+    ],
+    outputs: [
+      { name: 'outX' },
+      { name: 'outY' },
+      { name: 'distance' },
+      { name: 'angle' },
+      { name: 'mask' },
+    ],
+  },
+  circleInvert: {
+    type: 'circleInvert',
+    inputs: [
+      { name: 'x', defaultValue: 0 },
+      { name: 'y', defaultValue: 0 },
+      { name: 'radius', defaultValue: 0.5 },
+      { name: 'strength', defaultValue: 1 },
+    ],
+    outputs: [
+      { name: 'outX' },
+      { name: 'outY' },
+      { name: 'value' },
+      { name: 'distance' },
+      { name: 'angle' },
+      { name: 'mask' },
+    ],
+  },
+  polarRepeat: {
+    type: 'polarRepeat',
+    inputs: [
+      { name: 'x', defaultValue: 0 },
+      { name: 'y', defaultValue: 0 },
+      { name: 'sectors', defaultValue: 6, min: 1, max: 64, integer: true },
+      { name: 'offset', defaultValue: 0 },
+    ],
+    outputs: [
+      { name: 'outX' },
+      { name: 'outY' },
+      { name: 'value' },
+      { name: 'distance' },
+      { name: 'angle' },
+      { name: 'mask' },
+    ],
+  },
+  logPolar: {
+    type: 'logPolar',
+    inputs: [
+      { name: 'x', defaultValue: 0 },
+      { name: 'y', defaultValue: 0 },
+      { name: 'radialScale', defaultValue: 1 },
+      { name: 'angleScale', defaultValue: 1 },
+    ],
+    outputs: [
+      { name: 'outX' },
+      { name: 'outY' },
+      { name: 'value' },
+      { name: 'distance' },
+      { name: 'angle' },
+      { name: 'mask' },
+    ],
+  },
+  domainWarp: {
+    type: 'domainWarp',
+    inputs: [
+      { name: 'x', defaultValue: 0 },
+      { name: 'y', defaultValue: 0 },
+      { name: 'amount', defaultValue: 0.1 },
+      { name: 'freq', defaultValue: 8 },
+      { name: 'phase', defaultValue: 0 },
+    ],
+    outputs: [
+      { name: 'outX' },
+      { name: 'outY' },
+      { name: 'value' },
+      { name: 'distance' },
+      { name: 'angle' },
+      { name: 'mask' },
+    ],
+  },
+  foldSymmetry: {
+    type: 'foldSymmetry',
+    inputs: [
+      { name: 'x', defaultValue: 0 },
+      { name: 'y', defaultValue: 0 },
+      { name: 'angle', defaultValue: 0.523599 },
+      { name: 'iterations', defaultValue: 6, min: 0, max: 32, integer: true },
+    ],
+    outputs: [
+      { name: 'outX' },
+      { name: 'outY' },
+      { name: 'value' },
+      { name: 'distance' },
+      { name: 'angle' },
+      { name: 'mask' },
+    ],
+  },
+  juliaOrbitTrap: {
+    type: 'juliaOrbitTrap',
+    inputs: [
+      { name: 'x', defaultValue: 0 },
+      { name: 'y', defaultValue: 0 },
+      { name: 'cx', defaultValue: -0.8 },
+      { name: 'cy', defaultValue: 0.156 },
+      { name: 'iterations', defaultValue: 32, min: 0, max: 128, integer: true },
+      { name: 'bailout', defaultValue: 4 },
+    ],
+    outputs: [
+      { name: 'outX' },
+      { name: 'outY' },
+      { name: 'value' },
+      { name: 'minRadius' },
+      { name: 'escape' },
+      { name: 'iteration' },
+      { name: 'distance' },
+      { name: 'angle' },
+      { name: 'mask' },
     ],
   },
   Quantise: {
@@ -311,6 +494,14 @@ export function getDefinition(type: NodeType): NodeDefinition {
 }
 
 export function getNodeDefinition(node: Pick<PatchNode, 'type' | 'inputs' | 'outputs'>): NodeDefinition {
+  if (node.type === 'Expression') {
+    return {
+      type: node.type,
+      inputs: node.inputs ?? [],
+      outputs: getDefinition(node.type).outputs,
+    };
+  }
+
   if (node.type === 'Group') {
     return {
       type: node.type,

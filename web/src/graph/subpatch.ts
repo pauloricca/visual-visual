@@ -148,6 +148,7 @@ function cloneNode(node: PatchNode): PatchNode {
     type: node.type,
     ...(node.subpatchName ? { subpatchName: node.subpatchName } : {}),
     ...(node.subpatchCloneId ? { subpatchCloneId: node.subpatchCloneId } : {}),
+    ...(node.expression !== undefined ? { expression: node.expression } : {}),
     params: { ...node.params },
     ...(node.position ? { position: { ...node.position } } : {}),
     ...(node.inputs ? { inputs: node.inputs.map((port) => ({ ...port })) } : {}),

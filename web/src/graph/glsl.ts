@@ -1,3 +1,4 @@
+import { normalizeExpressionFloatLiterals, replaceExpressionInputs } from './expression';
 import { getNodeDefinition } from './nodeTypes';
 import { expandGroups } from './subpatch';
 import type { Patch, PatchLink, PatchNode } from './types';
@@ -397,6 +398,9 @@ function emitOutput(node: PatchNode, port: string, context: CompileContext): str
         throw new Error(`Output.${port} is not supported.`);
       }
       return resolveInput(node, port, context);
+    case 'Expression':
+      assertPort(node, port, 'value');
+      return emitExpression(node, context);
     case 'Constant':
       assertPort(node, port, 'value');
       return resolveInput(node, 'value', context);
@@ -418,6 +422,12 @@ function emitOutput(node: PatchNode, port: string, context: CompileContext): str
       return call1('cos', node, context);
     case 'Tan':
       return call1('tan', node, context);
+    case 'sinh':
+      return call1('sinh', node, context);
+    case 'cosh':
+      return call1('cosh', node, context);
+    case 'tanh':
+      return call1('tanh', node, context);
     case 'Atan':
       return call1('atan', node, context);
     case 'Abs':
@@ -463,6 +473,26 @@ function emitOutput(node: PatchNode, port: string, context: CompileContext): str
       return emitGate(node, context);
     case 'Rotate':
       return emitRotate(node, port, context);
+    case 'complexMul':
+      return emitComplexMul(node, port, context);
+    case 'complexDiv':
+      return emitComplexDiv(node, port, context);
+    case 'complexPow':
+      return emitComplexPow(node, port, context);
+    case 'mobius':
+      return emitMobius(node, port, context);
+    case 'circleInvert':
+      return emitCircleInvert(node, port, context);
+    case 'polarRepeat':
+      return emitPolarRepeat(node, port, context);
+    case 'logPolar':
+      return emitLogPolar(node, port, context);
+    case 'domainWarp':
+      return emitDomainWarp(node, port, context);
+    case 'foldSymmetry':
+      return emitFoldSymmetry(node, port, context);
+    case 'juliaOrbitTrap':
+      return emitJuliaOrbitTrap(node, port, context);
     case 'Quantise':
       assertPort(node, port, 'value');
       return `floor(${input(node, 'value', context)} * max(${input(node, 'levels', context)}, 1.0)) / max(${input(node, 'levels', context)}, 1.0)`;
@@ -499,6 +529,12 @@ function emitOutput(node: PatchNode, port: string, context: CompileContext): str
 
 function oscillatorPhase(node: PatchNode, context: CompileContext): string {
   return `fract(u_time * ${input(node, 'frequency', context)} + ${input(node, 'phase', context)})`;
+}
+
+function emitExpression(node: PatchNode, context: CompileContext): string {
+  const expression = node.expression?.trim() || '0.0';
+  const withInputs = replaceExpressionInputs(expression, (name) => input(node, name, context));
+  return `(${normalizeExpressionFloatLiterals(withInputs)})`;
 }
 
 function emitMap(node: PatchNode, context: CompileContext): string {
@@ -573,6 +609,196 @@ function emitRotate(node: PatchNode, port: string, context: CompileContext): str
       return `((${x} * sin(${angle})) + (${y} * cos(${angle})))`;
     default:
       throw new Error(`Rotate.${port} is not supported.`);
+  }
+}
+
+function emitComplexMul(node: PatchNode, port: string, context: CompileContext): string {
+  const ax = input(node, 'ax', context);
+  const ay = input(node, 'ay', context);
+  const bx = input(node, 'bx', context);
+  const by = input(node, 'by', context);
+  const outX = `complexMulX(${ax}, ${ay}, ${bx}, ${by})`;
+  const outY = `complexMulY(${ax}, ${ay}, ${bx}, ${by})`;
+
+  return emitCoordinateOutput(node, port, outX, outY);
+}
+
+function emitComplexDiv(node: PatchNode, port: string, context: CompileContext): string {
+  const ax = input(node, 'ax', context);
+  const ay = input(node, 'ay', context);
+  const bx = input(node, 'bx', context);
+  const by = input(node, 'by', context);
+  const outX = `complexDivX(${ax}, ${ay}, ${bx}, ${by})`;
+  const outY = `complexDivY(${ax}, ${ay}, ${bx}, ${by})`;
+
+  return emitCoordinateOutput(node, port, outX, outY, {
+    mask: `complexSafeMask(${bx}, ${by})`,
+  });
+}
+
+function emitComplexPow(node: PatchNode, port: string, context: CompileContext): string {
+  const zx = input(node, 'zx', context);
+  const zy = input(node, 'zy', context);
+  const power = input(node, 'power', context);
+  const outX = `complexPowX(${zx}, ${zy}, ${power})`;
+  const outY = `complexPowY(${zx}, ${zy}, ${power})`;
+
+  return emitCoordinateOutput(node, port, outX, outY);
+}
+
+function emitMobius(node: PatchNode, port: string, context: CompileContext): string {
+  const zx = input(node, 'zx', context);
+  const zy = input(node, 'zy', context);
+  const ax = input(node, 'ax', context);
+  const ay = input(node, 'ay', context);
+  const bx = input(node, 'bx', context);
+  const by = input(node, 'by', context);
+  const cx = input(node, 'cx', context);
+  const cy = input(node, 'cy', context);
+  const dx = input(node, 'dx', context);
+  const dy = input(node, 'dy', context);
+  const args = `${zx}, ${zy}, ${ax}, ${ay}, ${bx}, ${by}, ${cx}, ${cy}, ${dx}, ${dy}`;
+  const outX = `mobiusX(${args})`;
+  const outY = `mobiusY(${args})`;
+
+  return emitCoordinateOutput(node, port, outX, outY, {
+    mask: `mobiusSafeMask(${zx}, ${zy}, ${cx}, ${cy}, ${dx}, ${dy})`,
+  });
+}
+
+function emitCircleInvert(node: PatchNode, port: string, context: CompileContext): string {
+  const x = input(node, 'x', context);
+  const y = input(node, 'y', context);
+  const radius = input(node, 'radius', context);
+  const strength = input(node, 'strength', context);
+  const args = `${x}, ${y}, ${radius}, ${strength}`;
+  const outX = `circleInvertX(${args})`;
+  const outY = `circleInvertY(${args})`;
+
+  return emitCoordinateOutput(node, port, outX, outY, {
+    value: `circleInvertValue(${x}, ${y}, ${radius})`,
+    mask: `circleInvertMask(${x}, ${y}, ${radius})`,
+  });
+}
+
+function emitPolarRepeat(node: PatchNode, port: string, context: CompileContext): string {
+  const x = input(node, 'x', context);
+  const y = input(node, 'y', context);
+  const sectors = input(node, 'sectors', context);
+  const offset = input(node, 'offset', context);
+  const args = `${x}, ${y}, ${sectors}, ${offset}`;
+  const outX = `polarRepeatX(${args})`;
+  const outY = `polarRepeatY(${args})`;
+
+  return emitCoordinateOutput(node, port, outX, outY, {
+    value: `polarRepeatValue(${args})`,
+    mask: `polarRepeatMask(${args})`,
+  });
+}
+
+function emitLogPolar(node: PatchNode, port: string, context: CompileContext): string {
+  const x = input(node, 'x', context);
+  const y = input(node, 'y', context);
+  const radialScale = input(node, 'radialScale', context);
+  const angleScale = input(node, 'angleScale', context);
+  const args = `${x}, ${y}, ${radialScale}, ${angleScale}`;
+  const outX = `logPolarX(${args})`;
+  const outY = `logPolarY(${args})`;
+
+  return emitCoordinateOutput(node, port, outX, outY, {
+    value: `logPolarValue(${args})`,
+    distance: `sqrt(max((${x}) * (${x}) + (${y}) * (${y}), 0.0))`,
+    angle: `atan(${y}, ${x})`,
+    mask: `logPolarMask(${args})`,
+  });
+}
+
+function emitDomainWarp(node: PatchNode, port: string, context: CompileContext): string {
+  const x = input(node, 'x', context);
+  const y = input(node, 'y', context);
+  const amount = input(node, 'amount', context);
+  const freq = input(node, 'freq', context);
+  const phase = input(node, 'phase', context);
+  const args = `${x}, ${y}, ${amount}, ${freq}, ${phase}`;
+  const outX = `domainWarpX(${args})`;
+  const outY = `domainWarpY(${args})`;
+
+  return emitCoordinateOutput(node, port, outX, outY, {
+    value: `domainWarpValue(${args})`,
+    mask: `domainWarpMask(${args})`,
+  });
+}
+
+function emitFoldSymmetry(node: PatchNode, port: string, context: CompileContext): string {
+  const x = input(node, 'x', context);
+  const y = input(node, 'y', context);
+  const angle = input(node, 'angle', context);
+  const iterations = input(node, 'iterations', context);
+  const args = `${x}, ${y}, ${angle}, ${iterations}`;
+  const outX = `foldSymmetryX(${args})`;
+  const outY = `foldSymmetryY(${args})`;
+
+  return emitCoordinateOutput(node, port, outX, outY, {
+    value: `foldSymmetryValue(${args})`,
+    mask: `foldSymmetryMask(${args})`,
+  });
+}
+
+function emitJuliaOrbitTrap(node: PatchNode, port: string, context: CompileContext): string {
+  const x = input(node, 'x', context);
+  const y = input(node, 'y', context);
+  const cx = input(node, 'cx', context);
+  const cy = input(node, 'cy', context);
+  const iterations = input(node, 'iterations', context);
+  const bailout = input(node, 'bailout', context);
+  const args = `${x}, ${y}, ${cx}, ${cy}, ${iterations}, ${bailout}`;
+
+  switch (port) {
+    case 'outX':
+      return `juliaOrbitTrapValue(${args}, 0.0)`;
+    case 'outY':
+      return `juliaOrbitTrapValue(${args}, 1.0)`;
+    case 'value':
+      return `juliaOrbitTrapValue(${args}, 8.0)`;
+    case 'minRadius':
+      return `juliaOrbitTrapValue(${args}, 2.0)`;
+    case 'escape':
+      return `juliaOrbitTrapValue(${args}, 3.0)`;
+    case 'iteration':
+      return `juliaOrbitTrapValue(${args}, 4.0)`;
+    case 'distance':
+      return `juliaOrbitTrapValue(${args}, 5.0)`;
+    case 'angle':
+      return `juliaOrbitTrapValue(${args}, 6.0)`;
+    case 'mask':
+      return `juliaOrbitTrapValue(${args}, 7.0)`;
+    default:
+      throw new Error(`${node.type}.${port} is not supported.`);
+  }
+}
+
+function emitCoordinateOutput(
+  node: PatchNode,
+  port: string,
+  outX: string,
+  outY: string,
+  extras: Record<string, string> = {},
+): string {
+  switch (port) {
+    case 'outX':
+      return outX;
+    case 'outY':
+      return outY;
+    case 'distance':
+      return extras.distance ?? `sqrt(max((${outX}) * (${outX}) + (${outY}) * (${outY}), 0.0))`;
+    case 'angle':
+      return extras.angle ?? `atan(${outY}, ${outX})`;
+    case 'value':
+      return extras.value ?? `sqrt(max((${outX}) * (${outX}) + (${outY}) * (${outY}), 0.0))`;
+    case 'mask':
+      return extras.mask ?? '1.0';
+    default:
+      throw new Error(`${node.type}.${port} is not supported.`);
   }
 }
 
@@ -795,6 +1021,298 @@ vec3 hsvToRgb(vec3 hsv) {
   vec3 rgb = clamp(abs(mod(hsv.x * 6.0 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0);
   rgb = rgb * rgb * (3.0 - 2.0 * rgb);
   return hsv.z * mix(vec3(1.0), rgb, clamp(hsv.y, 0.0, 1.0));
+}
+
+const float VV_EPSILON = 0.000001;
+const float VV_TAU = 6.28318530718;
+
+float complexMulX(float ax, float ay, float bx, float by) {
+  return ax * bx - ay * by;
+}
+
+float complexMulY(float ax, float ay, float bx, float by) {
+  return ax * by + ay * bx;
+}
+
+float complexSafeMask(float bx, float by) {
+  return step(VV_EPSILON, bx * bx + by * by);
+}
+
+float complexDivX(float ax, float ay, float bx, float by) {
+  float denominator = max(bx * bx + by * by, VV_EPSILON);
+  return (ax * bx + ay * by) / denominator;
+}
+
+float complexDivY(float ax, float ay, float bx, float by) {
+  float denominator = max(bx * bx + by * by, VV_EPSILON);
+  return (ay * bx - ax * by) / denominator;
+}
+
+float complexPowX(float zx, float zy, float power) {
+  float radius = pow(max(sqrt(zx * zx + zy * zy), VV_EPSILON), power);
+  float angle = atan(zy, zx) * power;
+  return radius * cos(angle);
+}
+
+float complexPowY(float zx, float zy, float power) {
+  float radius = pow(max(sqrt(zx * zx + zy * zy), VV_EPSILON), power);
+  float angle = atan(zy, zx) * power;
+  return radius * sin(angle);
+}
+
+float mobiusDenominatorX(float zx, float zy, float cx, float cy, float dx, float dy) {
+  return complexMulX(cx, cy, zx, zy) + dx;
+}
+
+float mobiusDenominatorY(float zx, float zy, float cx, float cy, float dx, float dy) {
+  return complexMulY(cx, cy, zx, zy) + dy;
+}
+
+float mobiusSafeMask(float zx, float zy, float cx, float cy, float dx, float dy) {
+  float denX = mobiusDenominatorX(zx, zy, cx, cy, dx, dy);
+  float denY = mobiusDenominatorY(zx, zy, cx, cy, dx, dy);
+  return complexSafeMask(denX, denY);
+}
+
+float mobiusX(
+  float zx,
+  float zy,
+  float ax,
+  float ay,
+  float bx,
+  float by,
+  float cx,
+  float cy,
+  float dx,
+  float dy
+) {
+  float numX = complexMulX(ax, ay, zx, zy) + bx;
+  float numY = complexMulY(ax, ay, zx, zy) + by;
+  float denX = mobiusDenominatorX(zx, zy, cx, cy, dx, dy);
+  float denY = mobiusDenominatorY(zx, zy, cx, cy, dx, dy);
+  return complexDivX(numX, numY, denX, denY);
+}
+
+float mobiusY(
+  float zx,
+  float zy,
+  float ax,
+  float ay,
+  float bx,
+  float by,
+  float cx,
+  float cy,
+  float dx,
+  float dy
+) {
+  float numX = complexMulX(ax, ay, zx, zy) + bx;
+  float numY = complexMulY(ax, ay, zx, zy) + by;
+  float denX = mobiusDenominatorX(zx, zy, cx, cy, dx, dy);
+  float denY = mobiusDenominatorY(zx, zy, cx, cy, dx, dy);
+  return complexDivY(numX, numY, denX, denY);
+}
+
+float circleInvertValue(float x, float y, float radius) {
+  return (radius * radius) / max(x * x + y * y, VV_EPSILON);
+}
+
+float circleInvertX(float x, float y, float radius, float strength) {
+  return mix(x, x * circleInvertValue(x, y, radius), strength);
+}
+
+float circleInvertY(float x, float y, float radius, float strength) {
+  return mix(y, y * circleInvertValue(x, y, radius), strength);
+}
+
+float circleInvertMask(float x, float y, float radius) {
+  float r = max(abs(radius), VV_EPSILON);
+  float d = sqrt(x * x + y * y);
+  return 1.0 - smoothstep(r * 0.98, r * 1.02 + VV_EPSILON, d);
+}
+
+float polarRepeatSectorAngle(float sectors) {
+  return VV_TAU / max(abs(sectors), 1.0);
+}
+
+float polarRepeatAngle(float x, float y, float sectors, float offset) {
+  float sectorAngle = polarRepeatSectorAngle(sectors);
+  float angle = atan(y, x);
+  return mod(angle + offset + sectorAngle * 0.5, sectorAngle) - sectorAngle * 0.5 - offset;
+}
+
+float polarRepeatX(float x, float y, float sectors, float offset) {
+  float radius = sqrt(x * x + y * y);
+  return radius * cos(polarRepeatAngle(x, y, sectors, offset));
+}
+
+float polarRepeatY(float x, float y, float sectors, float offset) {
+  float radius = sqrt(x * x + y * y);
+  return radius * sin(polarRepeatAngle(x, y, sectors, offset));
+}
+
+float polarRepeatValue(float x, float y, float sectors, float offset) {
+  float sectorAngle = polarRepeatSectorAngle(sectors);
+  return polarRepeatAngle(x, y, sectors, offset) / sectorAngle + 0.5;
+}
+
+float polarRepeatMask(float x, float y, float sectors, float offset) {
+  float value = clamp(polarRepeatValue(x, y, sectors, offset), 0.0, 1.0);
+  float edgeDistance = min(value, 1.0 - value);
+  return 1.0 - smoothstep(0.0, 0.035, edgeDistance);
+}
+
+float logPolarX(float x, float y, float radialScale, float angleScale) {
+  return log(max(sqrt(x * x + y * y), VV_EPSILON)) * radialScale;
+}
+
+float logPolarY(float x, float y, float radialScale, float angleScale) {
+  return atan(y, x) * angleScale;
+}
+
+float gridLineMask(float value, float width) {
+  float f = fract(value);
+  return 1.0 - smoothstep(0.0, width, min(f, 1.0 - f));
+}
+
+float logPolarValue(float x, float y, float radialScale, float angleScale) {
+  return fract(logPolarX(x, y, radialScale, angleScale));
+}
+
+float logPolarMask(float x, float y, float radialScale, float angleScale) {
+  float lx = logPolarX(x, y, radialScale, angleScale);
+  float ly = logPolarY(x, y, radialScale, angleScale);
+  return max(gridLineMask(lx, 0.035), gridLineMask(ly, 0.035));
+}
+
+float domainWarpDeltaX(float x, float y, float freq, float phase) {
+  float px = x * freq;
+  float py = y * freq;
+  float octave1 = sin(py + phase);
+  float octave2 = 0.5 * sin(px * 2.03 + py * 1.71 + phase * 1.37);
+  float octave3 = 0.25 * cos(py * 4.11 - px * 1.23 + phase * 0.73);
+  return (octave1 + octave2 + octave3) / 1.75;
+}
+
+float domainWarpDeltaY(float x, float y, float freq, float phase) {
+  float px = x * freq;
+  float py = y * freq;
+  float octave1 = cos(px - phase);
+  float octave2 = 0.5 * cos(py * 1.97 - px * 1.43 + phase * 1.19);
+  float octave3 = 0.25 * sin(px * 3.73 + py * 0.89 - phase * 0.91);
+  return (octave1 + octave2 + octave3) / 1.75;
+}
+
+float domainWarpX(float x, float y, float amount, float freq, float phase) {
+  return x + amount * domainWarpDeltaX(x, y, freq, phase);
+}
+
+float domainWarpY(float x, float y, float amount, float freq, float phase) {
+  return y + amount * domainWarpDeltaY(x, y, freq, phase);
+}
+
+float domainWarpValue(float x, float y, float amount, float freq, float phase) {
+  float dx = amount * domainWarpDeltaX(x, y, freq, phase);
+  float dy = amount * domainWarpDeltaY(x, y, freq, phase);
+  return sqrt(dx * dx + dy * dy);
+}
+
+float domainWarpMask(float x, float y, float amount, float freq, float phase) {
+  return smoothstep(0.0, max(abs(amount), VV_EPSILON), domainWarpValue(x, y, amount, freq, phase));
+}
+
+float foldSymmetrySelect(float x, float y, float angle, float iterations, float channel) {
+  float px = x;
+  float py = y;
+  float count = clamp(floor(iterations + 0.5), 0.0, 32.0);
+  float lineDistance = 1000000.0;
+
+  for (int i = 0; i < 32; i++) {
+    if (float(i) >= count) {
+      break;
+    }
+
+    float axisAngle = angle * (float(i) + 1.0);
+    float c = cos(axisAngle);
+    float s = sin(axisAngle);
+    float along = px * c + py * s;
+    float across = -px * s + py * c;
+    lineDistance = min(lineDistance, abs(across));
+    across = abs(across);
+    px = along * c - across * s;
+    py = along * s + across * c;
+  }
+
+  float distance = sqrt(px * px + py * py);
+  float outAngle = atan(py, px);
+  float value = 0.5 + 0.5 * sin(distance * 12.0 + outAngle * max(count, 1.0));
+  float mask = 1.0 - smoothstep(0.0, 0.025, lineDistance);
+
+  if (channel < 0.5) return px;
+  if (channel < 1.5) return py;
+  if (channel < 2.5) return value;
+  return mask;
+}
+
+float foldSymmetryX(float x, float y, float angle, float iterations) {
+  return foldSymmetrySelect(x, y, angle, iterations, 0.0);
+}
+
+float foldSymmetryY(float x, float y, float angle, float iterations) {
+  return foldSymmetrySelect(x, y, angle, iterations, 1.0);
+}
+
+float foldSymmetryValue(float x, float y, float angle, float iterations) {
+  return foldSymmetrySelect(x, y, angle, iterations, 2.0);
+}
+
+float foldSymmetryMask(float x, float y, float angle, float iterations) {
+  return foldSymmetrySelect(x, y, angle, iterations, 3.0);
+}
+
+float juliaOrbitTrapValue(float x, float y, float cx, float cy, float iterations, float bailout, float channel) {
+  float zx = x;
+  float zy = y;
+  float minRadius = sqrt(zx * zx + zy * zy);
+  float escape = 0.0;
+  float escapeIteration = 0.0;
+  float count = clamp(floor(iterations + 0.5), 0.0, 128.0);
+  float bailoutRadius = max(abs(bailout), VV_EPSILON);
+  float bailoutSquared = bailoutRadius * bailoutRadius;
+
+  for (int i = 0; i < 128; i++) {
+    if (float(i) >= count) {
+      break;
+    }
+
+    float nextX = zx * zx - zy * zy + cx;
+    float nextY = 2.0 * zx * zy + cy;
+    zx = nextX;
+    zy = nextY;
+
+    float radiusSquared = zx * zx + zy * zy;
+    minRadius = min(minRadius, sqrt(radiusSquared));
+
+    if (radiusSquared > bailoutSquared) {
+      escapeIteration = float(i) + 1.0;
+      escape = escapeIteration / max(count, 1.0);
+      break;
+    }
+  }
+
+  float distance = sqrt(zx * zx + zy * zy);
+  float angle = atan(zy, zx);
+  float mask = 1.0 - step(VV_EPSILON, escape);
+  float value = exp(-minRadius * 4.0) * (0.35 + 0.65 * mask);
+
+  if (channel < 0.5) return zx;
+  if (channel < 1.5) return zy;
+  if (channel < 2.5) return minRadius;
+  if (channel < 3.5) return escape;
+  if (channel < 4.5) return escapeIteration;
+  if (channel < 5.5) return distance;
+  if (channel < 6.5) return angle;
+  if (channel < 7.5) return mask;
+  return value;
 }
 
 vec2 noiseGradient(vec2 p) {

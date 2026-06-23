@@ -8,6 +8,7 @@ export function normalizePatch(patch: Patch): Patch {
         type: node.type,
         ...(node.subpatchName ? { subpatchName: node.subpatchName } : {}),
         ...(node.subpatchCloneId ? { subpatchCloneId: node.subpatchCloneId } : {}),
+        ...(node.expression !== undefined ? { expression: node.expression } : {}),
         params: sortRecord(node.params),
         ...(node.position ? { position: node.position } : {}),
         ...(node.inputs ? { inputs: node.inputs.map((input) => ({ ...input })) } : {}),

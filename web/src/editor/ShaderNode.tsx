@@ -2,6 +2,7 @@ import { Handle, Position, useUpdateNodeInternals, type NodeProps } from '@xyflo
 import {
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type CSSProperties,
@@ -19,12 +20,16 @@ export function ShaderNode({ data, selected, dragging }: NodeProps<ShaderFlowNod
   const dragStartRef = useRef<{ x: number; y: number } | null>(null);
   const inputPortRowsRef = useRef<Record<string, HTMLDivElement | null>>({});
   const outputPortRowsRef = useRef<Record<string, HTMLDivElement | null>>({});
+  const expressionInputRef = useRef<HTMLInputElement | null>(null);
+  const skipNextExpressionBlurRef = useRef(false);
   const [dragSource, setDragSource] = useState<{ side: 'input' | 'output'; port: string } | null>(null);
   const [dragTarget, setDragTarget] = useState<{ side: 'input' | 'output'; port: string } | null>(null);
+  const [expressionDraft, setExpressionDraft] = useState(node.expression ?? '');
   const definition = node.type ? getNodeDefinition(node as PatchNode) : null;
   const isScope = node.type === 'Scope';
   const isMeter = node.type === 'Meter';
   const isGroup = node.type === 'Group';
+  const isExpression = node.type === 'Expression';
   const canRenameInputs = node.type === 'Outs';
   const canRenameOutputs = node.type === 'Ins';
   const outputCount = definition?.outputs.length ?? 0;
@@ -51,12 +56,23 @@ export function ShaderNode({ data, selected, dragging }: NodeProps<ShaderFlowNod
     isScope ? 'shader-node-scope' : '',
     isMeter ? 'shader-node-meter' : '',
     isGroup ? 'shader-node-group' : '',
+    isExpression ? 'shader-node-expression' : '',
   ].filter(Boolean).join(' ');
 
   useLayoutEffect(() => {
     const animationFrame = requestAnimationFrame(() => updateNodeInternals(node.id));
     return () => cancelAnimationFrame(animationFrame);
   }, [inputLabelWidth, node.id, outputCount, outputLabelWidth, previewAddsOutput, updateNodeInternals]);
+
+  useEffect(() => {
+    if (document.activeElement === expressionInputRef.current) return;
+    setExpressionDraft(node.expression ?? '');
+  }, [node.expression]);
+
+  function commitExpressionDraft() {
+    if (!isExpression) return;
+    data.onExpressionCommit?.(node.id, expressionDraft);
+  }
 
   function moveDraggedPortToTarget(side: 'input' | 'output', draggedPort: string, targetPort: string, portOrder: string[]) {
     if (draggedPort === targetPort) return;
@@ -230,8 +246,37 @@ export function ShaderNode({ data, selected, dragging }: NodeProps<ShaderFlowNod
           return (
         <div className={[
           'shader-node-body',
+          isExpression ? 'shader-node-body-expression' : '',
           outputPorts.length === 0 || showHeaderOutput ? 'shader-node-body-no-outputs' : '',
         ].filter(Boolean).join(' ')}>
+          {isExpression ? (
+            <input
+              ref={expressionInputRef}
+              aria-label="GLSL expression"
+              className="expression-editor nodrag nopan nowheel"
+              spellCheck={false}
+              type="text"
+              value={expressionDraft}
+              onChange={(event) => setExpressionDraft(event.currentTarget.value)}
+              onBlur={() => {
+                if (skipNextExpressionBlurRef.current) {
+                  skipNextExpressionBlurRef.current = false;
+                  return;
+                }
+                commitExpressionDraft();
+              }}
+              onKeyDown={(event) => {
+                event.stopPropagation();
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  commitExpressionDraft();
+                  skipNextExpressionBlurRef.current = true;
+                  event.currentTarget.blur();
+                }
+              }}
+              onPointerDown={(event) => event.stopPropagation()}
+            />
+          ) : null}
           <div className="shader-ports shader-inputs" style={inputStyle}>
             {inputPorts.map((input) => (
             <div
@@ -495,15 +540,16 @@ function NodeTypePicker({ nodeType, displayLabel, open, onOpen, onClose, onChang
   const [highlightedIndex, setHighlightedIndex] = useState(0);
   const [dragIntent, setDragIntent] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
   const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const pointerStartRef = useRef<{ x: number; y: number } | null>(null);
-  const options = NODE_TYPE_LIST.filter((type) => {
+  const options = useMemo(() => NODE_TYPE_LIST.filter((type) => {
     const normalizedQuery = query.trim().toLowerCase();
     return (
       type.toLowerCase().includes(normalizedQuery) ||
       getNodeTypeLabel(type).toLowerCase().includes(normalizedQuery)
     );
-  });
+  }), [query]);
   const nodeTypeLabel = nodeType ? getNodeTypeLabel(nodeType) : 'type';
   const pickerLabel = displayLabel ?? nodeTypeLabel;
 
@@ -537,7 +583,7 @@ function NodeTypePicker({ nodeType, displayLabel, open, onOpen, onClose, onChang
   useEffect(() => {
     if (!open) return;
     optionRefs.current[highlightedIndex]?.scrollIntoView({ block: 'nearest' });
-  }, [highlightedIndex, open, options]);
+  }, [highlightedIndex, open]);
 
   function choose(type: NodeType) {
     onChange(type);
@@ -625,6 +671,9 @@ function NodeTypePicker({ nodeType, displayLabel, open, onOpen, onClose, onChang
           onChange={(event) => {
             setQuery(event.target.value);
             setHighlightedIndex(0);
+            if (menuRef.current) {
+              menuRef.current.scrollTop = 0;
+            }
           }}
           onBlur={onClose}
           onFocus={(event) => event.currentTarget.select()}
@@ -634,6 +683,7 @@ function NodeTypePicker({ nodeType, displayLabel, open, onOpen, onClose, onChang
           spellCheck={false}
         />
         <div
+          ref={menuRef}
           className="node-type-picker-menu nowheel"
           onMouseDown={(event) => {
             event.preventDefault();

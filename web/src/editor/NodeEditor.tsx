@@ -18,10 +18,11 @@ import {
   Viewport,
 } from '@xyflow/react';
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type MouseEvent as ReactMouseEvent, type MutableRefObject } from 'react';
+import { extractExpressionInputs } from '../graph/expression';
 import { compilePatchToGlsl } from '../graph/glsl';
-import { acceptsInputLink, defaultParamsFor, getDefinition, getNodeDefinition, NODE_TYPE_LIST } from '../graph/nodeTypes';
+import { defaultParamsFor, getDefinition, getNodeDefinition, NODE_TYPE_LIST } from '../graph/nodeTypes';
 import { patchToJson } from '../graph/serialize';
-import type { LinkMode, NodeType, Patch, PatchLink, PatchNode, PortDefinition } from '../graph/types';
+import type { LinkMode, NodeDefinition, NodeType, Patch, PatchLink, PatchNode, PortDefinition } from '../graph/types';
 import { validatePatch } from '../graph/validate';
 import { ExportPanel } from '../export/ExportPanel';
 import { demoPatch } from '../graph/demoPatch';
@@ -55,6 +56,7 @@ const PASTE_OFFSET = { x: 36, y: 36 };
 const DRAFT_NODE_WIDTH = 168;
 const DRAFT_NODE_HANDLE_X_OFFSET = 13;
 const DRAFT_NODE_FIRST_PORT_Y = 52;
+const DEFAULT_EXPRESSION = 'a';
 let subpatchCloneSequence = 0;
 
 type GraphSnapshot = Pick<PersistedEditorState, 'nodes' | 'edges'>;
@@ -170,6 +172,7 @@ function NodeEditorInner() {
   const duplicateDragRef = useRef<DuplicateDragState | null>(null);
   const historyGroupRef = useRef<{ key: string; time: number } | null>(null);
   const nodeDragHistoryRef = useRef(false);
+  const edgeSelectionTimeoutRef = useRef<number | null>(null);
   const [history, setHistory] = useState<HistoryState>({
     past: [],
     future: [],
@@ -216,6 +219,12 @@ function NodeEditorInner() {
   useEffect(() => {
     pendingBoundaryPortRef.current = pendingBoundaryPort;
   }, [pendingBoundaryPort]);
+
+  useEffect(() => () => {
+    if (edgeSelectionTimeoutRef.current !== null) {
+      window.clearTimeout(edgeSelectionTimeoutRef.current);
+    }
+  }, []);
 
   const commitHistory = useCallback((groupKey?: string) => {
     const now = Date.now();
@@ -373,6 +382,64 @@ function NodeEditorInner() {
     );
   }, [commitHistory]);
 
+  const updateNodeExpression = useCallback((nodeId: string, expression: string) => {
+    setNodes((current) =>
+      current.map((node) => {
+        if (node.id !== nodeId || node.data.patchNode.type !== 'Expression') return node;
+
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            patchNode: {
+              ...node.data.patchNode,
+              expression,
+            },
+          },
+        };
+      }),
+    );
+  }, [commitHistory]);
+
+  const commitNodeExpression = useCallback((nodeId: string, expression: string) => {
+    const nextInputs = expressionInputDefinitions(expression);
+    const nextInputNames = new Set(nextInputs.map((input) => input.name));
+    const currentNode = nodesRef.current.find((node) => node.id === nodeId);
+    if (!currentNode || currentNode.data.patchNode.type !== 'Expression') return;
+    if (
+      currentNode.data.patchNode.expression === expression &&
+      samePortDefinitions(currentNode.data.patchNode.inputs ?? [], nextInputs)
+    ) {
+      return;
+    }
+
+    commitHistory();
+
+    setNodes((current) =>
+      current.map((node) => {
+        if (node.id !== nodeId || node.data.patchNode.type !== 'Expression') return node;
+
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            patchNode: {
+              ...node.data.patchNode,
+              expression,
+              inputs: nextInputs,
+              params: syncParamsToInputs(node.data.patchNode.params, nextInputs),
+            },
+          },
+        };
+      }),
+    );
+    setEdges((current) => dedupeEdges(current.filter((edge) => {
+      const link = linkFromEdge(edge);
+      if (!link) return false;
+      return link.to.node !== nodeId || nextInputNames.has(link.to.port);
+    })));
+  }, [commitHistory]);
+
   const updateEdgeWeight = useCallback((edgeIdToUpdate: string, weight: number) => {
     commitHistory(`weight:${edgeIdToUpdate}`);
     setEdges((current) =>
@@ -446,6 +513,15 @@ function NodeEditorInner() {
     if (!relatedNode) return;
 
     const previousType = relatedNode.data.patchNode.type;
+    const previousDefinition = previousType ? getNodeDefinition(relatedNode.data.patchNode as PatchNode) : null;
+    const nextExpression = relatedNode.data.patchNode.expression ?? DEFAULT_EXPRESSION;
+    const nextInputs = type === 'Expression'
+      ? expressionInputDefinitions(nextExpression)
+      : getDefinition(type).inputs;
+    const nextDefinition = {
+      ...getDefinition(type),
+      inputs: nextInputs,
+    };
     const nextId = shouldAutoRenameForTypeChange(nodeId, previousType)
       ? nextTypeNodeId(nodeId, type, nodes)
       : nodeId;
@@ -455,9 +531,10 @@ function NodeEditorInner() {
       current.map((node) => {
         if (node.id !== nodeId) return node;
 
-        const previousInputs = previousType ? getDefinition(previousType).inputs : [];
-        const nextInputs = getDefinition(type).inputs;
-        const nextParams = defaultParamsFor(type);
+        const previousInputs = previousDefinition?.inputs ?? [];
+        const nextParams = type === 'Expression'
+          ? syncParamsToInputs({}, nextInputs)
+          : defaultParamsFor(type);
 
         for (const [index, input] of nextInputs.entries()) {
           const previousInput = previousInputs[index];
@@ -479,6 +556,7 @@ function NodeEditorInner() {
               ...node.data.patchNode,
               id: nextId,
               type,
+              ...(type === 'Expression' ? { expression: nextExpression } : { expression: undefined }),
               params: nextNodeParams,
               ...(type === 'Group' ? {
                 inputs: node.data.patchNode.inputs,
@@ -486,6 +564,12 @@ function NodeEditorInner() {
                 subpatch: node.data.patchNode.subpatch,
                 subpatchName: node.data.patchNode.subpatchName ?? node.id,
                 subpatchCloneId: node.data.patchNode.subpatchCloneId ?? makeSubpatchCloneId(node.id),
+              } : type === 'Expression' ? {
+                inputs: nextInputs,
+                outputs: undefined,
+                subpatch: undefined,
+                subpatchName: undefined,
+                subpatchCloneId: undefined,
               } : {
                 inputs: undefined,
                 outputs: undefined,
@@ -501,7 +585,7 @@ function NodeEditorInner() {
     setEdges((current) =>
       dedupeEdges(current.flatMap((edge) => {
         const renamedEdge = renameEdgeNode(edge, nodeId, nextId);
-        const remapped = remapEdgeForNodeType(renamedEdge, nextId, previousType, type);
+        const remapped = remapEdgeForNodeType(renamedEdge, nextId, previousDefinition, nextDefinition);
         return remapped ? [remapped] : [];
       })),
     );
@@ -1128,6 +1212,8 @@ function NodeEditorInner() {
         data: {
           ...node.data,
           onParamChange: updateNodeParam,
+          onExpressionChange: updateNodeExpression,
+          onExpressionCommit: commitNodeExpression,
           onTypeChange: updateNodeType,
           onTypeEditStart: setEditingTypeNodeId,
           onTypeEditEnd: () => setEditingTypeNodeId(null),
@@ -1153,8 +1239,10 @@ function NodeEditorInner() {
       nodes,
       pendingBoundaryPort,
       selectedBoundaryPort,
+      commitNodeExpression,
       updateBoundaryPortName,
       updateBoundaryPortOrder,
+      updateNodeExpression,
       updateNodeId,
       updateNodeParam,
       updateNodeType,
@@ -1531,11 +1619,13 @@ function NodeEditorInner() {
     }
 
     commitHistory();
+    const newEdgeId = edgeId(link);
+    setNodes((current) => current.map((node) => ({ ...node, selected: false })));
     setEdges((current) => {
-      return addEdge(
+      const nextEdges = addEdge(
         {
           ...candidate,
-          id: edgeId(link),
+          id: newEdgeId,
           source: link.from.node,
           sourceHandle: `out:${link.from.port}`,
           target: link.to.node,
@@ -1548,10 +1638,21 @@ function NodeEditorInner() {
             onInsertNode: insertNodeOnEdge,
           },
         },
-        current,
+        current.map((edge) => ({ ...edge, selected: false })),
       );
+
+      return nextEdges.map((edge) => ({ ...edge, selected: edge.id === newEdgeId }));
     });
+    if (edgeSelectionTimeoutRef.current !== null) {
+      window.clearTimeout(edgeSelectionTimeoutRef.current);
+    }
+    edgeSelectionTimeoutRef.current = window.setTimeout(() => {
+      setNodes((current) => current.map((node) => ({ ...node, selected: false })));
+      setEdges((current) => current.map((edge) => ({ ...edge, selected: edge.id === newEdgeId })));
+      edgeSelectionTimeoutRef.current = null;
+    }, 0);
     setPendingBoundaryPort(null);
+    setSelectedBoundaryPort(null);
   }, [commitHistory, edges, insertNodeOnEdge, materializePendingBoundaryPort, updateEdgeMode, updateEdgeWeight]);
 
   const deleteSelectedBoundaryPort = useCallback(() => {
@@ -2631,6 +2732,7 @@ function patchNodeFromFlowNode(node: ShaderFlowNode): PatchNode {
     type: patchNode.type,
     ...(patchNode.subpatchName ? { subpatchName: patchNode.subpatchName } : {}),
     ...(patchNode.subpatchCloneId ? { subpatchCloneId: patchNode.subpatchCloneId } : {}),
+    ...(patchNode.expression !== undefined ? { expression: patchNode.expression } : {}),
     params: { ...patchNode.params },
     position: { ...node.position },
     ...(patchNode.inputs ? { inputs: patchNode.inputs.map((port) => ({ ...port })) } : {}),
@@ -2646,6 +2748,7 @@ function clonePatch(patch: Patch): Patch {
       type: node.type,
       ...(node.subpatchName ? { subpatchName: node.subpatchName } : {}),
       ...(node.subpatchCloneId ? { subpatchCloneId: node.subpatchCloneId } : {}),
+      ...(node.expression !== undefined ? { expression: node.expression } : {}),
       params: { ...node.params },
       ...(node.position ? { position: { ...node.position } } : {}),
       ...(node.inputs ? { inputs: node.inputs.map((port) => ({ ...port })) } : {}),
@@ -3063,6 +3166,7 @@ function duplicateGraph(
           type: node.data.patchNode.type,
           ...(subpatchName ? { subpatchName } : {}),
           ...(subpatchCloneId ? { subpatchCloneId } : {}),
+          ...(node.data.patchNode.expression !== undefined ? { expression: node.data.patchNode.expression } : {}),
           params: { ...node.data.patchNode.params },
           position,
           ...(node.data.patchNode.inputs ? { inputs: node.data.patchNode.inputs.map((port) => ({ ...port })) } : {}),
@@ -3118,6 +3222,7 @@ function cloneFlowNodeSnapshot(node: ShaderFlowNode): ShaderFlowNode {
         ...node.data.patchNode,
         params: { ...node.data.patchNode.params },
         position,
+        ...(node.data.patchNode.expression !== undefined ? { expression: node.data.patchNode.expression } : {}),
         ...(node.data.patchNode.inputs ? { inputs: node.data.patchNode.inputs.map((port) => ({ ...port })) } : {}),
         ...(node.data.patchNode.outputs ? { outputs: node.data.patchNode.outputs.map((port) => ({ ...port })) } : {}),
         ...(node.data.patchNode.subpatch ? { subpatch: clonePatch(node.data.patchNode.subpatch) } : {}),
@@ -3372,6 +3477,35 @@ function graphSnapshotKey(snapshot: GraphSnapshot): string {
   return JSON.stringify(snapshot);
 }
 
+function expressionInputDefinitions(expression: string): PortDefinition[] {
+  return extractExpressionInputs(expression).map((name) => ({
+    name,
+    defaultValue: 0,
+  }));
+}
+
+function syncParamsToInputs(
+  params: Record<string, number>,
+  inputs: PortDefinition[],
+): Record<string, number> {
+  return Object.fromEntries(inputs.map((input) => [
+    input.name,
+    params[input.name] ?? input.defaultValue ?? 0,
+  ]));
+}
+
+function samePortDefinitions(left: PortDefinition[], right: PortDefinition[]): boolean {
+  if (left.length !== right.length) return false;
+  return left.every((port, index) => (
+    port.name === right[index]?.name &&
+    port.defaultValue === right[index]?.defaultValue &&
+    port.connectable === right[index]?.connectable &&
+    port.min === right[index]?.min &&
+    port.max === right[index]?.max &&
+    port.integer === right[index]?.integer
+  ));
+}
+
 function shouldRecordNodeChanges(
   changes: NodeChange<ShaderFlowNode>[],
   dragHistoryRef: MutableRefObject<boolean>,
@@ -3505,18 +3639,18 @@ function midpointPosition(
 function remapEdgeForNodeType(
   edge: ShaderFlowEdge,
   nodeId: string,
-  previousType: NodeType | null,
-  nextType: NodeType,
+  previousDefinition: NodeDefinition | null,
+  nextDefinition: NodeDefinition,
 ): ShaderFlowEdge | null {
   const link = linkFromEdge(edge);
   if (!link) return null;
   if (link.from.node !== nodeId && link.to.node !== nodeId) return edge;
 
-  if (!previousType) {
+  if (!previousDefinition) {
     let nextLink = link;
 
     if (link.from.node === nodeId) {
-      const nextPort = getDefinition(nextType).outputs[0]?.name;
+      const nextPort = nextDefinition.outputs[0]?.name;
       if (!nextPort) return null;
       nextLink = {
         ...nextLink,
@@ -3525,7 +3659,7 @@ function remapEdgeForNodeType(
     }
 
     if (link.to.node === nodeId) {
-      const nextPort = getDefinition(nextType).inputs.find((input) => input.connectable !== false)?.name;
+      const nextPort = nextDefinition.inputs.find((input) => input.connectable !== false)?.name;
       if (!nextPort) return null;
       nextLink = {
         ...nextLink,
@@ -3540,8 +3674,8 @@ function remapEdgeForNodeType(
 
   if (link.from.node === nodeId) {
     const nextPort = remapPortByIndex(
-      getDefinition(previousType).outputs.map((port) => port.name),
-      getDefinition(nextType).outputs.map((port) => port.name),
+      previousDefinition.outputs.map((port) => port.name),
+      nextDefinition.outputs.map((port) => port.name),
       link.from.port,
     );
     if (!nextPort) return null;
@@ -3553,11 +3687,11 @@ function remapEdgeForNodeType(
 
   if (link.to.node === nodeId) {
     const nextPort = remapPortByIndex(
-      getDefinition(previousType).inputs.map((port) => port.name),
-      getDefinition(nextType).inputs.map((port) => port.name),
+      previousDefinition.inputs.map((port) => port.name),
+      nextDefinition.inputs.map((port) => port.name),
       link.to.port,
     );
-    if (!nextPort || !acceptsInputLink(nextType, nextPort)) return null;
+    if (!nextPort || !nextDefinition.inputs.some((input) => input.name === nextPort && input.connectable !== false)) return null;
     nextLink = {
       ...nextLink,
       to: { ...nextLink.to, port: nextPort },
@@ -3784,16 +3918,29 @@ function parsePatchNode(value: unknown, index: number): Patch['nodes'][number] {
   if (!isNumberRecord(value.params)) {
     throw new Error(`Node "${value.id}" needs numeric params.`);
   }
+  if (value.expression !== undefined && typeof value.expression !== 'string') {
+    throw new Error(`Node "${value.id}" expression must be a string.`);
+  }
 
   const position = value.position === undefined ? undefined : parsePosition(value.position, value.id);
-  const inputs = value.inputs === undefined ? undefined : parsePortDefinitions(value.inputs, `Node "${value.id}" inputs`);
+  const parsedInputs = value.inputs === undefined ? undefined : parsePortDefinitions(value.inputs, `Node "${value.id}" inputs`);
   const outputs = value.outputs === undefined ? undefined : parsePortDefinitions(value.outputs, `Node "${value.id}" outputs`);
   const subpatch = value.subpatch === undefined ? undefined : parsePatchObject(value.subpatch, `Node "${value.id}" subpatch`);
+  const expression = value.type === 'Expression'
+    ? (value.expression ?? DEFAULT_EXPRESSION)
+    : value.expression;
+  const inputs = value.type === 'Expression' && expression !== undefined
+    ? (parsedInputs ?? expressionInputDefinitions(expression))
+    : parsedInputs;
+  const params = value.type === 'Expression' && inputs
+    ? syncParamsToInputs(value.params, inputs)
+    : value.params;
 
   return {
     id: value.id,
     type: value.type,
-    params: value.params,
+    ...(expression !== undefined ? { expression } : {}),
+    params,
     ...(position ? { position } : {}),
     ...(inputs ? { inputs } : {}),
     ...(outputs ? { outputs } : {}),
