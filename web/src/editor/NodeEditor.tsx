@@ -7,7 +7,6 @@ import {
   Controls,
   EdgeChange,
   HandleType,
-  MiniMap,
   NodeChange,
   OnConnectEnd,
   OnConnectStartParams,
@@ -16,6 +15,7 @@ import {
   ReactFlowProvider,
   SelectionMode,
   Viewport,
+  type CoordinateExtent,
 } from '@xyflow/react';
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type MouseEvent as ReactMouseEvent, type MutableRefObject } from 'react';
 import { extractExpressionInputs } from '../graph/expression';
@@ -58,11 +58,15 @@ const DRAFT_NODE_HANDLE_X_OFFSET = 13;
 const DRAFT_NODE_FIRST_PORT_Y = 52;
 const DEFAULT_EXPRESSION = 'a';
 const SELECTED_EDGE_Z_INDEX = 10000;
+const MAX_FLOW_OFFSCREEN_RATIO = 0.5;
+const DEFAULT_NODE_BOUNDS = { width: 240, height: 96 };
+const FLOW_INFINITE_EXTENT: CoordinateExtent = [[Number.NEGATIVE_INFINITY, Number.NEGATIVE_INFINITY], [Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY]];
 let subpatchCloneSequence = 0;
 
 type GraphSnapshot = Pick<PersistedEditorState, 'nodes' | 'edges'>;
 type HistoryState = { past: GraphSnapshot[]; future: GraphSnapshot[] };
 type MidiCcValueMap = Map<string, number>;
+type EditorSize = { width: number; height: number };
 
 interface DraftNodeConnection {
   originNodeId: string;
@@ -131,6 +135,8 @@ function NodeEditorInner() {
   const [uiHidden, setUiHidden] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [viewport, setViewport] = useState<Viewport>(initialState?.ui?.viewport ?? { x: 0, y: 0, zoom: 1 });
+  const [viewportForBounds, setViewportForBounds] = useState<Viewport>(initialState?.ui?.viewport ?? { x: 0, y: 0, zoom: 1 });
+  const [editorSize, setEditorSize] = useState<EditorSize>({ width: 0, height: 0 });
   const [fps, setFps] = useState(0);
   const [reactFlow, setReactFlow] = useState<ReactFlowInstance<ShaderFlowNode, ShaderFlowEdge> | null>(null);
   const [edgeOverlayElement, setEdgeOverlayElement] = useState<HTMLElement | null>(null);
@@ -196,6 +202,26 @@ function NodeEditorInner() {
   useEffect(() => {
     edgesRef.current = edges;
   }, [edges]);
+
+  useEffect(() => {
+    const editorShell = editorShellRef.current;
+    if (!editorShell) return;
+
+    const updateEditorSize = () => {
+      const rect = editorShell.getBoundingClientRect();
+      const width = Math.round(rect.width);
+      const height = Math.round(rect.height);
+      setEditorSize((current) => (
+        current.width === width && current.height === height ? current : { width, height }
+      ));
+    };
+
+    updateEditorSize();
+    const resizeObserver = new ResizeObserver(updateEditorSize);
+    resizeObserver.observe(editorShell);
+
+    return () => resizeObserver.disconnect();
+  }, []);
 
   const updateDraftNodeConnection = useCallback((
     value: DraftNodeConnection | null | ((current: DraftNodeConnection | null) => DraftNodeConnection | null),
@@ -1433,6 +1459,10 @@ function NodeEditorInner() {
     ],
     [displayEdges, draftNodePreview, duplicateDragPreview],
   );
+  const translateExtent = useMemo(
+    () => getFlowTranslateExtent(nodes, editorSize, viewportForBounds.zoom),
+    [editorSize, nodes, viewportForBounds.zoom],
+  );
   useEffect(() => {
     saveEditorState(materializedGraph.nodes, materializedGraph.edges, {
       patchName: rootPatchName,
@@ -2287,9 +2317,14 @@ function NodeEditorInner() {
             onConnect={onConnect}
             onConnectStart={onConnectStart}
             onConnectEnd={onConnectEnd}
-            onMoveEnd={(_, nextViewport) => setViewport(nextViewport)}
+            onMove={(_, nextViewport) => setViewportForBounds(nextViewport)}
+            onMoveEnd={(_, nextViewport) => {
+              setViewportForBounds(nextViewport);
+              setViewport(nextViewport);
+            }}
             connectionMode={ConnectionMode.Loose}
             connectionLineStyle={draftNodePreview ? { stroke: 'transparent' } : undefined}
+            translateExtent={translateExtent}
             panOnScroll
             panOnDrag={false}
             zoomOnScroll={false}
@@ -2304,7 +2339,6 @@ function NodeEditorInner() {
             fitView={!initialState?.ui?.viewport}
           >
             <Controls />
-            <MiniMap pannable zoomable />
           </ReactFlow>
         </EdgeOverlayProvider>
       </section>
@@ -3360,6 +3394,57 @@ function removeClassName(className: string | undefined, classNameToRemove: strin
     .join(' ');
 
   return nextClassName || undefined;
+}
+
+function getFlowTranslateExtent(
+  nodes: ShaderFlowNode[],
+  editorSize: EditorSize,
+  zoom: number,
+): CoordinateExtent {
+  if (editorSize.width <= 0 || editorSize.height <= 0) {
+    return FLOW_INFINITE_EXTENT;
+  }
+
+  const visibleNodes = nodes.filter((node) => !node.hidden);
+  const safeZoom = Math.max(zoom, 0.01);
+  const maxOffscreenX = (editorSize.width * MAX_FLOW_OFFSCREEN_RATIO) / safeZoom;
+  const maxOffscreenY = (editorSize.height * MAX_FLOW_OFFSCREEN_RATIO) / safeZoom;
+
+  if (visibleNodes.length === 0) {
+    return [
+      [-maxOffscreenX, -maxOffscreenY],
+      [maxOffscreenX, maxOffscreenY],
+    ];
+  }
+
+  const bounds = visibleNodes.reduce(
+    (current, node) => {
+      const width = node.measured?.width ?? node.width ?? node.initialWidth ?? DEFAULT_NODE_BOUNDS.width;
+      const height = node.measured?.height ?? node.height ?? node.initialHeight ?? DEFAULT_NODE_BOUNDS.height;
+      const left = node.position.x;
+      const top = node.position.y;
+      const right = left + width;
+      const bottom = top + height;
+
+      return {
+        minX: Math.min(current.minX, left),
+        minY: Math.min(current.minY, top),
+        maxX: Math.max(current.maxX, right),
+        maxY: Math.max(current.maxY, bottom),
+      };
+    },
+    {
+      minX: Number.POSITIVE_INFINITY,
+      minY: Number.POSITIVE_INFINITY,
+      maxX: Number.NEGATIVE_INFINITY,
+      maxY: Number.NEGATIVE_INFINITY,
+    },
+  );
+
+  return [
+    [bounds.minX - maxOffscreenX, bounds.minY - maxOffscreenY],
+    [bounds.maxX + maxOffscreenX, bounds.maxY + maxOffscreenY],
+  ];
 }
 
 function draftNodePosition(

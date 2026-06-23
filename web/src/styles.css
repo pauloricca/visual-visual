@@ -85,8 +85,8 @@ select:hover {
 .viewport-buttons {
   position: absolute;
   z-index: var(--z-viewport-controls);
-  top: var(--viewport-inset);
   right: var(--viewport-inset);
+  bottom: var(--viewport-inset);
   display: flex;
   gap: 6px;
   align-items: center;
@@ -207,8 +207,7 @@ select:hover {
   background: transparent;
 }
 
-.react-flow__controls,
-.react-flow__minimap {
+.react-flow__controls {
   border: 1px solid #fff;
   border-radius: 0;
   background: var(--surface-bg);
@@ -222,12 +221,6 @@ select:hover {
   display: flex;
   visibility: visible;
   opacity: 1;
-}
-
-.react-flow__minimap {
-  right: var(--viewport-inset) !important;
-  bottom: var(--viewport-inset) !important;
-  margin: 0 !important;
 }
 
 .react-flow__attribution {
@@ -255,14 +248,6 @@ select:hover {
   pointer-events: none;
 }
 
-.react-flow__minimap-mask {
-  fill: rgba(255, 255, 255, 0.08);
-}
-
-.react-flow__minimap-node {
-  fill: #fff;
-}
-
 .app-shell-ui-hidden,
 .app-shell-ui-hidden * {
   cursor: none !important;
@@ -272,7 +257,6 @@ select:hover {
 .app-shell-ui-hidden .react-flow__edges,
 .app-shell-ui-hidden .react-flow__edgelabel-renderer,
 .app-shell-ui-hidden .react-flow__controls,
-.app-shell-ui-hidden .react-flow__minimap,
 .app-shell-ui-hidden .fps-counter,
 .app-shell-ui-hidden .viewport-buttons {
   display: none;
