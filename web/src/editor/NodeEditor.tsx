@@ -57,6 +57,7 @@ const DRAFT_NODE_WIDTH = 168;
 const DRAFT_NODE_HANDLE_X_OFFSET = 13;
 const DRAFT_NODE_FIRST_PORT_Y = 52;
 const DEFAULT_EXPRESSION = 'a';
+const SELECTED_EDGE_Z_INDEX = 10000;
 let subpatchCloneSequence = 0;
 
 type GraphSnapshot = Pick<PersistedEditorState, 'nodes' | 'edges'>;
@@ -1292,8 +1293,21 @@ function NodeEditorInner() {
       const className = link && feedbackEdgeIds.has(edgeId(link))
         ? 'shader-edge shader-edge-feedback'
         : 'shader-edge';
+      const isFeedback = link ? feedbackEdgeIds.has(edgeId(link)) : false;
+      const zIndex = edge.selected ? SELECTED_EDGE_Z_INDEX : undefined;
 
-      return edge.className === className ? edge : { ...edge, className };
+      if (edge.className === className && edge.data?.isFeedback === isFeedback && edge.zIndex === zIndex) {
+        return edge;
+      }
+      return {
+        ...edge,
+        className,
+        zIndex,
+        data: {
+          ...edge.data,
+          isFeedback,
+        },
+      };
     });
   }, [edgesWithCallbacks, feedbackEdgeIds]);
   const draftNodePreview = useMemo(() => {

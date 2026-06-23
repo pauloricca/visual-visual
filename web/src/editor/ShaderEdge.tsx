@@ -12,10 +12,15 @@ import { useEdgeOverlayTarget } from './EdgeOverlayContext';
 import type { ShaderFlowEdge } from './flowPatch';
 
 const LINK_CONTROLS_SHOW_DELAY_MS = 260;
+const FEEDBACK_CURVE_OFFSET = 142;
 
 export function ShaderEdge(props: EdgeProps<ShaderFlowEdge>) {
   const [linkControlsVisible, setLinkControlsVisible] = useState(false);
-  const [edgePath, labelX, labelY] = getBezierPath(props);
+  const isFeedback = props.data?.isFeedback === true;
+  const [defaultEdgePath, defaultLabelX, defaultLabelY] = getBezierPath(props);
+  const [edgePath, labelX, labelY] = isFeedback
+    ? getFeedbackPath(props, FEEDBACK_CURVE_OFFSET)
+    : [defaultEdgePath, defaultLabelX, defaultLabelY];
   const overlayTarget = useEdgeOverlayTarget();
   const reactFlow = useReactFlow();
   const viewport = useViewport();
@@ -26,14 +31,20 @@ export function ShaderEdge(props: EdgeProps<ShaderFlowEdge>) {
   const underlayClassName = [
     'shader-edge-path',
     'shader-edge-path-underlay',
+    isFeedback ? 'shader-edge-path-feedback' : '',
   ].join(' ');
   const edgeClassName = [
     'shader-edge-path',
     'shader-edge-path-foreground',
+    isFeedback ? 'shader-edge-path-feedback' : '',
     selected ? 'shader-edge-path-selected' : '',
   ].filter(Boolean).join(' ');
-  const selectedUnderlayStyle = selected ? { stroke: '#0b0b0b', strokeWidth: 6 } : undefined;
-  const selectedForegroundStyle = selected ? { stroke: '#b8b8b8', strokeWidth: 2 } : undefined;
+  const selectedUnderlayStyle = selected
+    ? { stroke: '#0b0b0b', strokeWidth: 8 }
+    : undefined;
+  const selectedForegroundStyle = selected
+    ? { stroke: '#7cff00', strokeWidth: 3 }
+    : undefined;
 
   useEffect(() => {
     if (!showLinkControls) {
@@ -60,7 +71,7 @@ export function ShaderEdge(props: EdgeProps<ShaderFlowEdge>) {
         path={edgePath}
         className={edgeClassName}
         style={selectedForegroundStyle}
-        interactionWidth={18}
+        interactionWidth={isFeedback ? 36 : 18}
       />
       {showLinkControls && linkControlsVisible && overlayTarget ? (
         createPortal(
@@ -84,6 +95,31 @@ export function ShaderEdge(props: EdgeProps<ShaderFlowEdge>) {
       ) : null}
     </>
   );
+}
+
+function getFeedbackPath(
+  props: EdgeProps<ShaderFlowEdge>,
+  minimumOffset: number,
+): [string, number, number] {
+  const sourceX = props.sourceX;
+  const sourceY = props.sourceY;
+  const targetX = props.targetX;
+  const targetY = props.targetY;
+  const horizontalDistance = Math.abs(sourceX - targetX);
+  const verticalDistance = Math.abs(sourceY - targetY);
+  const offset = Math.max(minimumOffset, horizontalDistance * 0.8 + verticalDistance * 0.2);
+  const path = [
+    `M ${sourceX},${sourceY}`,
+    `C ${sourceX + offset},${sourceY}`,
+    `${targetX - offset},${targetY}`,
+    `${targetX},${targetY}`,
+  ].join(' ');
+
+  return [
+    path,
+    (sourceX + targetX) / 2,
+    (sourceY + targetY) / 2,
+  ];
 }
 
 interface EdgeLinkControlsProps {

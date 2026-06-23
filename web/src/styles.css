@@ -719,19 +719,20 @@ select:hover {
 }
 
 .shader-edge-feedback .shader-edge-path-foreground,
-.shader-edge-feedback.shader-edge-path-foreground {
+.shader-edge-feedback.shader-edge-path-foreground,
+.shader-edge-path-feedback.shader-edge-path-foreground {
   stroke: #ffe45c;
 }
 
 .react-flow__edge.selected .shader-edge-path-foreground,
 .shader-edge-path-selected {
-  stroke: #b8b8b8;
-  stroke-width: 2;
+  stroke: #7cff00;
+  stroke-width: 3;
 }
 
 .react-flow__edge.selected .shader-edge-path-underlay {
   stroke: #0b0b0b;
-  stroke-width: 6;
+  stroke-width: 8;
 }
 
 .shader-edge-preview .shader-edge-path-underlay,
@@ -757,10 +758,17 @@ select:hover {
   gap: 4px;
   padding: 4px;
   border: 1px solid #fff;
-  background: var(--surface-bg);
+  background:
+    linear-gradient(#fff, #fff) left top / 100% 4px no-repeat,
+    linear-gradient(#fff, #fff) left bottom / 100% 4px no-repeat,
+    linear-gradient(#fff, #fff) left top / 4px 100% no-repeat,
+    linear-gradient(#fff, #fff) right top / 4px 100% no-repeat,
+    linear-gradient(#fff, #fff) left 26px / 100% 4px no-repeat;
+  color: #000;
   font-size: 13px;
   font-weight: 400;
   pointer-events: all;
+  box-shadow: 6px 6px 0 rgba(0, 0, 0, 0.42);
   transform-origin: center;
   --edge-control-width: 96px;
 }
@@ -770,7 +778,7 @@ select:hover {
   height: 22px;
   padding: 0 4px;
   border: 1px solid #fff;
-  background: transparent;
+  background: var(--surface-bg);
   color: #fff;
   cursor: ns-resize;
   font-size: 13px;
@@ -791,7 +799,7 @@ select:hover {
 .edge-weight-scrubber-editing {
   display: block;
   border-color: #fff;
-  background: transparent;
+  background: var(--surface-bg);
   color: #fff;
   cursor: text;
   font-size: 13px;
@@ -811,7 +819,7 @@ select:hover {
   padding: 0 4px;
   border: 1px solid #fff;
   border-radius: 0;
-  background: transparent;
+  background: var(--surface-bg);
   color: #fff;
   cursor: pointer;
   font-size: 13px;
