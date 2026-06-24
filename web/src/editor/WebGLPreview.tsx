@@ -1,6 +1,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
 import type { ShaderArg, ShaderBufferSlot, ShaderDelaySlot, ShaderEnvelopeSlot, ShaderMediaRequirements, ShaderMeterSlot, ShaderScopeSlot } from '../graph/glsl';
+import { EMPTY_MEDIA_REQUIREMENTS } from '../render/renderBundle';
 
 interface Props {
   active?: boolean;
@@ -14,6 +15,7 @@ interface Props {
   meterSlots?: ShaderMeterSlot[];
   mediaRequirements?: ShaderMediaRequirements;
   onFpsChange?: (fps: number) => void;
+  showErrorOverlay?: boolean;
 }
 
 export interface WebGLPreviewHandle {
@@ -98,11 +100,6 @@ const MAX_DELAY_FRAMES = 32;
 const DELAY_HISTORY_LENGTH = MAX_DELAY_FRAMES + 1;
 const CAMERA_RETRY_INTERVAL_MS = 1000;
 const METER_UPDATE_INTERVAL_FRAMES = 6;
-const EMPTY_MEDIA_REQUIREMENTS: ShaderMediaRequirements = {
-  useMic: false,
-  useCamera: false,
-};
-
 export const WebGLPreview = forwardRef<WebGLPreviewHandle, Props>(function WebGLPreview({
   active = true,
   fragmentShader,
@@ -115,6 +112,7 @@ export const WebGLPreview = forwardRef<WebGLPreviewHandle, Props>(function WebGL
   meterSlots = [],
   mediaRequirements = EMPTY_MEDIA_REQUIREMENTS,
   onFpsChange,
+  showErrorOverlay = true,
 }: Props, ref) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const glRef = useRef<WebGL2RenderingContext | null>(null);
@@ -503,7 +501,7 @@ export const WebGLPreview = forwardRef<WebGLPreviewHandle, Props>(function WebGL
   return (
     <>
       <canvas ref={canvasRef} className="webgl-preview" aria-hidden="true" />
-      {error ? <div className="webgl-error">{error}</div> : null}
+      {showErrorOverlay && error ? <div className="webgl-error">{error}</div> : null}
     </>
   );
 });

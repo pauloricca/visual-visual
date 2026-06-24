@@ -10,7 +10,15 @@ The app is a browser node editor that exports deterministic patch JSON, generate
 ./start
 ```
 
-The script runs Docker Compose and opens `http://localhost:5173/`.
+The script generates a local self-signed HTTPS certificate when `openssl` is available, runs Docker Compose, and opens the editor.
+It also prints the standalone viewer URL:
+
+- Editor: `https://localhost:5173/`
+- Viewer: `https://localhost:5173/viewer`
+
+Open the viewer on a projector computer and the editor on another client pointed at the same server. Whenever the editor compiles a valid patch, it publishes the latest render bundle to connected viewers. The viewer uses the same WebGL renderer as the editor preview, captures its own local microphone/camera when the shader needs them, and shows only the canvas.
+
+Browsers allow microphone/camera capture on `localhost`, but usually block it on plain HTTP LAN IPs. `./start` serves HTTPS with a self-signed certificate so projector capture can work at `https://192.168.x.x:5173/viewer`; accept or trust the certificate in the projector browser first. If `openssl` is not available, the script falls back to HTTP and LAN camera/mic capture may be blocked.
 
 - Double-click the black canvas to create a node.
 - Type in the node title picker to choose the node type.

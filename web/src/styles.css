@@ -66,6 +66,19 @@ select:hover {
   background: transparent;
 }
 
+.viewer-shell {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #000;
+  cursor: none;
+}
+
+.viewer-shell .webgl-preview {
+  cursor: none;
+}
+
 .app-shell-panel-closed {
   grid-template-columns: minmax(0, 1fr);
 }
@@ -669,6 +682,18 @@ select:hover {
   transform: translateY(-50%);
 }
 
+.shader-handle-selected-link {
+  border-color: #7cff00;
+  background: #7cff00;
+  box-shadow: 0 0 0 2px #0b0b0b;
+  cursor: grab;
+  pointer-events: none;
+}
+
+.shader-handle-selected-link:active {
+  cursor: grabbing;
+}
+
 .shader-handle-input {
   left: -13px;
 }
@@ -695,11 +720,28 @@ select:hover {
   stroke-width: 2;
 }
 
+.react-flow__connection-path {
+  stroke: #7cff00 !important;
+  stroke-width: 3 !important;
+}
+
+.react-flow__edge.updating .react-flow__edge-path.shader-edge-path-foreground,
+.react-flow__edge.selectable:focus .react-flow__edge-path.shader-edge-path-foreground,
+.react-flow__edge.selectable:focus-visible .react-flow__edge-path.shader-edge-path-foreground {
+  stroke: #fff !important;
+}
+
 .shader-edge .shader-edge-path-underlay,
 .shader-edge-path-underlay {
   stroke: #0b0b0b;
   stroke-width: 5.4;
   pointer-events: none;
+}
+
+.react-flow__edge.updating .react-flow__edge-path.shader-edge-path-underlay,
+.react-flow__edge.selectable:focus .react-flow__edge-path.shader-edge-path-underlay,
+.react-flow__edge.selectable:focus-visible .react-flow__edge-path.shader-edge-path-underlay {
+  stroke: #0b0b0b !important;
 }
 
 .shader-edge-feedback .shader-edge-path-foreground,
@@ -708,15 +750,47 @@ select:hover {
   stroke: #ffe45c;
 }
 
+.react-flow__edge.updating .react-flow__edge-path.shader-edge-path-feedback.shader-edge-path-foreground,
+.react-flow__edge.selectable:focus .react-flow__edge-path.shader-edge-path-feedback.shader-edge-path-foreground,
+.react-flow__edge.selectable:focus-visible .react-flow__edge-path.shader-edge-path-feedback.shader-edge-path-foreground {
+  stroke: #ffe45c !important;
+}
+
 .react-flow__edge.selected .shader-edge-path-foreground,
 .shader-edge-path-selected {
-  stroke: #7cff00;
+  stroke: #7cff00 !important;
   stroke-width: 3;
 }
 
+.react-flow__edge.selected.updating .react-flow__edge-path.shader-edge-path-foreground,
+.react-flow__edge.selected.selectable:focus .react-flow__edge-path.shader-edge-path-foreground,
+.react-flow__edge.selected.selectable:focus-visible .react-flow__edge-path.shader-edge-path-foreground {
+  stroke: #7cff00 !important;
+}
+
 .react-flow__edge.selected .shader-edge-path-underlay {
-  stroke: #0b0b0b;
+  stroke: #0b0b0b !important;
   stroke-width: 8;
+}
+
+.react-flow__edge.selected .react-flow__edgeupdater {
+  fill: transparent;
+  stroke: transparent;
+  stroke-width: 0;
+  cursor: grab;
+  pointer-events: all;
+}
+
+.react-flow__edge.selected .react-flow__edgeupdater-source {
+  transform: translateX(-12px);
+}
+
+.react-flow__edge.selected .react-flow__edgeupdater-target {
+  transform: translateX(12px);
+}
+
+.react-flow__edge.selected .react-flow__edgeupdater:active {
+  cursor: grabbing;
 }
 
 .shader-edge-preview .shader-edge-path-underlay,
@@ -888,6 +962,130 @@ select:hover {
 
 .panel-file-input {
   display: none;
+}
+
+.import-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-export-panel);
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.54);
+}
+
+.import-modal {
+  width: min(560px, 100%);
+  max-height: min(640px, calc(100vh - 48px));
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #fff;
+  background: var(--menu-bg);
+  color: #fff;
+}
+
+.import-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px;
+  border-bottom: 1px solid #fff;
+}
+
+.import-modal-header h2,
+.import-modal-header p,
+.import-modal-message {
+  margin: 0;
+}
+
+.import-modal-header h2 {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.import-modal-header p,
+.import-subpatch-path,
+.import-subpatch-meta {
+  color: rgba(255, 255, 255, 0.66);
+}
+
+.import-modal-close {
+  width: var(--control-size);
+  height: var(--control-size);
+  padding: 0;
+}
+
+.import-modal-message {
+  padding: 12px;
+  border-bottom: 1px solid #fff;
+}
+
+.import-subpatch-list {
+  min-height: 0;
+  overflow: auto;
+}
+
+.import-subpatch-option {
+  width: 100%;
+  height: auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 12px;
+  padding: 10px 12px;
+  border: 0;
+  border-bottom: 1px solid #333;
+  background: transparent;
+  text-align: left;
+  line-height: 1.25;
+}
+
+.import-subpatch-option:hover,
+.import-subpatch-option:focus,
+.import-subpatch-option-selected {
+  background: #fff;
+  color: #000;
+  outline: 0;
+}
+
+.import-subpatch-option:hover .import-subpatch-path,
+.import-subpatch-option:hover .import-subpatch-meta,
+.import-subpatch-option:focus .import-subpatch-path,
+.import-subpatch-option:focus .import-subpatch-meta,
+.import-subpatch-option-selected .import-subpatch-path,
+.import-subpatch-option-selected .import-subpatch-meta {
+  color: rgba(0, 0, 0, 0.62);
+}
+
+.import-subpatch-name,
+.import-subpatch-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.import-subpatch-name {
+  font-weight: 700;
+}
+
+.import-subpatch-path {
+  grid-column: 1;
+}
+
+.import-subpatch-meta {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: center;
+  white-space: nowrap;
+}
+
+.import-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px;
+  border-top: 1px solid #fff;
 }
 
 .status {

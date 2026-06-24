@@ -42,6 +42,8 @@ export function ShaderNode({ data, selected, dragging }: NodeProps<ShaderFlowNod
   );
   const showHeaderOutput = outputCount === 1 && !previewAddsOutput;
   const headerOutputPort = showHeaderOutput && definition ? definition.outputs[0]?.name ?? null : null;
+  const selectedLinkInputs = data.selectedLinkPorts?.inputs ?? [];
+  const selectedLinkOutputs = data.selectedLinkPorts?.outputs ?? [];
   const inputLabelWidth = definition
     ? `${Math.max(0, ...definition.inputs.map((input) => input.name.length))}ch`
     : '0ch';
@@ -189,7 +191,10 @@ export function ShaderNode({ data, selected, dragging }: NodeProps<ShaderFlowNod
             id={`out:${headerOutputPort}`}
             type="source"
             position={Position.Right}
-            className="shader-handle shader-handle-output shader-handle-output-title"
+            className={[
+              'shader-handle shader-handle-output shader-handle-output-title',
+              selectedLinkOutputs.includes(headerOutputPort) ? 'shader-handle-selected-link' : '',
+            ].filter(Boolean).join(' ')}
             onDoubleClick={(event) => {
               event.stopPropagation();
               data.onPortDoubleClick(node.id, 'output', headerOutputPort);
@@ -203,7 +208,10 @@ export function ShaderNode({ data, selected, dragging }: NodeProps<ShaderFlowNod
             id="in:value"
             type="target"
             position={Position.Left}
-            className="shader-handle shader-handle-input shader-handle-scope"
+            className={[
+              'shader-handle shader-handle-input shader-handle-scope',
+              selectedLinkInputs.includes('value') ? 'shader-handle-selected-link' : '',
+            ].filter(Boolean).join(' ')}
             onDoubleClick={(event) => {
               event.stopPropagation();
               data.onPortDoubleClick(node.id, 'input', 'value');
@@ -217,7 +225,10 @@ export function ShaderNode({ data, selected, dragging }: NodeProps<ShaderFlowNod
             id="in:value"
             type="target"
             position={Position.Left}
-            className="shader-handle shader-handle-input shader-handle-meter"
+            className={[
+              'shader-handle shader-handle-input shader-handle-meter',
+              selectedLinkInputs.includes('value') ? 'shader-handle-selected-link' : '',
+            ].filter(Boolean).join(' ')}
             onDoubleClick={(event) => {
               event.stopPropagation();
               data.onPortDoubleClick(node.id, 'input', 'value');
@@ -300,7 +311,10 @@ export function ShaderNode({ data, selected, dragging }: NodeProps<ShaderFlowNod
                   id={`in:${input.name}`}
                   type="target"
                   position={Position.Left}
-                  className="shader-handle shader-handle-input"
+                  className={[
+                    'shader-handle shader-handle-input',
+                    selectedLinkInputs.includes(input.name) ? 'shader-handle-selected-link' : '',
+                  ].filter(Boolean).join(' ')}
                   onDoubleClick={(event) => {
                     if (input.preview) return;
                     event.stopPropagation();
@@ -372,7 +386,10 @@ export function ShaderNode({ data, selected, dragging }: NodeProps<ShaderFlowNod
                   id={`out:${output.name}`}
                   type="source"
                   position={Position.Right}
-                  className="shader-handle shader-handle-output"
+                  className={[
+                    'shader-handle shader-handle-output',
+                    selectedLinkOutputs.includes(output.name) ? 'shader-handle-selected-link' : '',
+                  ].filter(Boolean).join(' ')}
                   onDoubleClick={(event) => {
                     if (output.preview) return;
                     event.stopPropagation();

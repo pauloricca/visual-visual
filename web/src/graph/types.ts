@@ -96,6 +96,7 @@ export interface PatchLink {
 export interface Patch {
   nodes: PatchNode[];
   links: PatchLink[];
+  name?: string;
 }
 
 export interface PortDefinition {

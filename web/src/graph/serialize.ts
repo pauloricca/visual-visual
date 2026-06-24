@@ -2,6 +2,7 @@ import type { Patch } from './types';
 
 export function normalizePatch(patch: Patch): Patch {
   return {
+    ...(patch.name ? { name: patch.name } : {}),
     nodes: [...patch.nodes]
       .map((node) => ({
         id: node.id,

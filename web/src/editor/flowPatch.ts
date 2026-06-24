@@ -19,6 +19,7 @@ export interface ShaderNodeData extends Record<string, unknown> {
   onPortMove: (nodeId: string, side: 'input' | 'output', port: string, direction: -1 | 1) => void;
   onPortSelect?: (nodeId: string, side: 'input' | 'output', port: string) => void;
   selectedPort?: { side: 'input' | 'output'; name: string } | null;
+  selectedLinkPorts?: { inputs: string[]; outputs: string[] };
   previewPort?: { side: 'input' | 'output'; name: string } | null;
   isTypePickerOpen: boolean;
 }

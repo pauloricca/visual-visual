@@ -25,6 +25,8 @@ import { patchToJson } from '../graph/serialize';
 import type { LinkMode, NodeDefinition, NodeType, Patch, PatchLink, PatchNode, PortDefinition } from '../graph/types';
 import { validatePatch } from '../graph/validate';
 import { ExportPanel } from '../export/ExportPanel';
+import { renderBundleFromCompileResult, renderBundleRevision } from '../render/renderBundle';
+import { useRenderSyncPublisher } from '../sync/renderSync';
 import { demoPatch } from '../graph/demoPatch';
 import {
   edgeId,
@@ -67,6 +69,24 @@ type GraphSnapshot = Pick<PersistedEditorState, 'nodes' | 'edges'>;
 type HistoryState = { past: GraphSnapshot[]; future: GraphSnapshot[] };
 type MidiCcValueMap = Map<string, number>;
 type EditorSize = { width: number; height: number };
+
+interface ImportedSubpatchCandidate {
+  key: string;
+  name: string;
+  path: string;
+  sourceNodeId: string;
+  subpatch: Patch;
+  inputCount: number;
+  outputCount: number;
+  nodeCount: number;
+}
+
+interface SubpatchImportModalState {
+  fileName: string;
+  candidates: ImportedSubpatchCandidate[];
+  selectedKey: string | null;
+  error: string | null;
+}
 
 interface DraftNodeConnection {
   originNodeId: string;
@@ -137,6 +157,7 @@ function NodeEditorInner() {
   const [viewport, setViewport] = useState<Viewport>(initialState?.ui?.viewport ?? { x: 0, y: 0, zoom: 1 });
   const [viewportForBounds, setViewportForBounds] = useState<Viewport>(initialState?.ui?.viewport ?? { x: 0, y: 0, zoom: 1 });
   const [editorSize, setEditorSize] = useState<EditorSize>({ width: 0, height: 0 });
+  const [subpatchImportModal, setSubpatchImportModal] = useState<SubpatchImportModalState | null>(null);
   const [fps, setFps] = useState(0);
   const [reactFlow, setReactFlow] = useState<ReactFlowInstance<ShaderFlowNode, ShaderFlowEdge> | null>(null);
   const [edgeOverlayElement, setEdgeOverlayElement] = useState<HTMLElement | null>(null);
@@ -177,6 +198,9 @@ function NodeEditorInner() {
   const draftNodeConnectionRef = useRef<DraftNodeConnection | null>(null);
   const pendingBoundaryPortRef = useRef<BoundaryPortSelection | null>(null);
   const duplicateDragRef = useRef<DuplicateDragState | null>(null);
+  const reconnectingEdgeRef = useRef(false);
+  const reconnectDuplicateRef = useRef(false);
+  const reconnectPreviewSourceRef = useRef<ShaderFlowEdge | null>(null);
   const historyGroupRef = useRef<{ key: string; time: number } | null>(null);
   const nodeDragHistoryRef = useRef(false);
   const edgeSelectionTimeoutRef = useRef<number | null>(null);
@@ -189,7 +213,9 @@ function NodeEditorInner() {
   const [pendingBoundaryPort, setPendingBoundaryPort] = useState<BoundaryPortSelection | null>(null);
   const [selectedBoundaryPort, setSelectedBoundaryPort] = useState<BoundaryPortSelection | null>(null);
   const [duplicateDrag, setDuplicateDrag] = useState<DuplicateDragState | null>(null);
+  const [reconnectPreviewEdge, setReconnectPreviewEdge] = useState<ShaderFlowEdge | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const importFileInputRef = useRef<HTMLInputElement | null>(null);
   const editorShellRef = useRef<HTMLElement | null>(null);
   const previewRef = useRef<WebGLPreviewHandle | null>(null);
   const midiCcValuesRef = useRef<MidiCcValueMap>(loadMidiCcValues());
@@ -933,6 +959,12 @@ function NodeEditorInner() {
   }, [editingStack]);
 
   const onConnectStart = useCallback((event: globalThis.MouseEvent | TouchEvent, params: OnConnectStartParams) => {
+    if (reconnectingEdgeRef.current) {
+      updateDraftNodeConnection(null);
+      setPendingBoundaryPort(null);
+      return;
+    }
+
     const pointer = clientPointFromEvent(event);
     if (!pointer || !params.nodeId || !params.handleId || !params.handleType) {
       updateDraftNodeConnection(null);
@@ -978,6 +1010,12 @@ function NodeEditorInner() {
   }, [editingStack.length, updateDraftNodeConnection]);
 
   const onConnectEnd = useCallback<OnConnectEnd>((event, connectionState) => {
+    if (reconnectingEdgeRef.current) {
+      setPendingBoundaryPort(null);
+      updateDraftNodeConnection(null);
+      return;
+    }
+
     const pointer = clientPointFromEvent(event);
     if (pointer && draftNodeConnectionRef.current) {
       draftNodeConnectionRef.current = {
@@ -1232,6 +1270,37 @@ function NodeEditorInner() {
     updateDuplicateDrag(null);
   }, [commitHistory, updateDuplicateDrag]);
 
+  const selectedLinkPortsByNode = useMemo(() => {
+    const portsByNode = new Map<string, { inputs: Set<string>; outputs: Set<string> }>();
+
+    const ensureEntry = (nodeId: string) => {
+      const existing = portsByNode.get(nodeId);
+      if (existing) return existing;
+
+      const entry = { inputs: new Set<string>(), outputs: new Set<string>() };
+      portsByNode.set(nodeId, entry);
+      return entry;
+    };
+
+    for (const edge of edges) {
+      if (edge.selected !== true) continue;
+
+      const link = linkFromEdge(edge);
+      if (!link) continue;
+
+      ensureEntry(link.from.node).outputs.add(link.from.port);
+      ensureEntry(link.to.node).inputs.add(link.to.port);
+    }
+
+    return new Map([...portsByNode].map(([nodeId, ports]) => [
+      nodeId,
+      {
+        inputs: [...ports.inputs],
+        outputs: [...ports.outputs],
+      },
+    ]));
+  }, [edges]);
+
   const nodesWithCallbacks = useMemo(
     () =>
       nodes.map((node) => ({
@@ -1254,6 +1323,7 @@ function NodeEditorInner() {
           selectedPort: selectedBoundaryPort && selectedBoundaryPort.nodeId === node.id
             ? { side: selectedBoundaryPort.side, name: selectedBoundaryPort.port }
             : null,
+          selectedLinkPorts: selectedLinkPortsByNode.get(node.id),
           previewPort: pendingBoundaryPort && pendingBoundaryPort.nodeId === node.id
             ? { side: pendingBoundaryPort.side, name: pendingBoundaryPort.port }
             : null,
@@ -1265,6 +1335,7 @@ function NodeEditorInner() {
       insertNodeOnPort,
       nodes,
       pendingBoundaryPort,
+      selectedLinkPortsByNode,
       selectedBoundaryPort,
       commitNodeExpression,
       updateBoundaryPortName,
@@ -1282,6 +1353,7 @@ function NodeEditorInner() {
 
       return edges.map((edge) => ({
         ...edge,
+        reconnectable: edge.selected === true,
         data: {
           ...edge.data,
           weight: edge.data?.weight ?? 1,
@@ -1304,10 +1376,26 @@ function NodeEditorInner() {
   const isEditingSubpatch = editingStack.length > 0;
   const patch = useMemo(() => patchFromFlow(materializedGraph.nodes, materializedGraph.edges), [materializedGraph]);
   const patchJson = useMemo(() => patchToJson(patch), [patch]);
+  const exportedPatchJson = useMemo(() => {
+    const patchWithName = { ...patch, name: rootPatchName };
+    return patchToJson(patchWithName);
+  }, [patch, rootPatchName]);
   const validation = useMemo(() => validatePatch(patch), [patch]);
   const compileResult = useMemo(() => compilePatchToGlsl(patch, 'webgl2', {
     enableScopes: !uiHidden,
   }), [patch, uiHidden]);
+  const projectorCompileResult = useMemo(() => compilePatchToGlsl(patch, 'webgl2', {
+    enableScopes: false,
+  }), [patch]);
+  const projectorRevision = useMemo(
+    () => renderBundleRevision(`${rootPatchName}\n${patchJson}`),
+    [patchJson, rootPatchName],
+  );
+  const projectorBundle = useMemo(
+    () => renderBundleFromCompileResult(projectorCompileResult, rootPatchName, projectorRevision),
+    [projectorCompileResult, projectorRevision, rootPatchName],
+  );
+  useRenderSyncPublisher(projectorBundle);
   const canGroupSelection = useMemo(() => (
     nodes.some((node) => node.selected) &&
     nodes.filter((node) => node.selected).every((node) => node.data.patchNode.type !== null)
@@ -1454,10 +1542,11 @@ function NodeEditorInner() {
   const previewEdges = useMemo(
     () => [
       ...displayEdges,
+      ...(reconnectPreviewEdge ? [reconnectPreviewEdge] : []),
       ...(duplicateDragPreview?.edges ?? []),
       ...(draftNodePreview ? [draftNodePreview.edge] : []),
     ],
-    [displayEdges, draftNodePreview, duplicateDragPreview],
+    [displayEdges, draftNodePreview, duplicateDragPreview, reconnectPreviewEdge],
   );
   const translateExtent = useMemo(
     () => getFlowTranslateExtent(nodes, editorSize, viewportForBounds.zoom),
@@ -1519,6 +1608,24 @@ function NodeEditorInner() {
       window.removeEventListener('keyup', updateModifier);
     };
   }, [draftNodeConnection, updateDraftNodeConnection]);
+
+  useEffect(() => {
+    function updateReconnectDuplicateModifier(event: KeyboardEvent) {
+      if (!reconnectingEdgeRef.current) return;
+      const duplicateActive = isReconnectDuplicateModifierPressed(event);
+      reconnectDuplicateRef.current = duplicateActive;
+      setReconnectPreviewEdge(duplicateActive && reconnectPreviewSourceRef.current
+        ? reconnectPreviewFromEdge(reconnectPreviewSourceRef.current)
+        : null);
+    }
+
+    window.addEventListener('keydown', updateReconnectDuplicateModifier);
+    window.addEventListener('keyup', updateReconnectDuplicateModifier);
+    return () => {
+      window.removeEventListener('keydown', updateReconnectDuplicateModifier);
+      window.removeEventListener('keyup', updateReconnectDuplicateModifier);
+    };
+  }, []);
 
   useEffect(() => {
     if (!duplicateDrag) return;
@@ -1699,6 +1806,94 @@ function NodeEditorInner() {
     setSelectedBoundaryPort(null);
   }, [commitHistory, edges, insertNodeOnEdge, materializePendingBoundaryPort, updateEdgeMode, updateEdgeWeight]);
 
+  const onReconnectStart = useCallback((event: ReactMouseEvent, edge: ShaderFlowEdge) => {
+    const duplicateActive = isReconnectDuplicateModifierPressed(event);
+    reconnectingEdgeRef.current = true;
+    reconnectDuplicateRef.current = duplicateActive;
+    reconnectPreviewSourceRef.current = edge;
+    setReconnectPreviewEdge(duplicateActive ? reconnectPreviewFromEdge(edge) : null);
+    updateDraftNodeConnection(null);
+    setPendingBoundaryPort(null);
+  }, [updateDraftNodeConnection]);
+
+  const onReconnectEnd = useCallback(() => {
+    reconnectingEdgeRef.current = false;
+    reconnectDuplicateRef.current = false;
+    reconnectPreviewSourceRef.current = null;
+    setReconnectPreviewEdge(null);
+    updateDraftNodeConnection(null);
+    setPendingBoundaryPort(null);
+  }, [updateDraftNodeConnection]);
+
+  const onReconnect = useCallback((oldEdge: ShaderFlowEdge, connection: Connection) => {
+    const candidate: ShaderFlowEdge = {
+      ...oldEdge,
+      source: connection.source ?? '',
+      sourceHandle: connection.sourceHandle,
+      target: connection.target ?? '',
+      targetHandle: connection.targetHandle,
+    };
+    const link = linkFromEdge(candidate);
+    if (!link) return;
+
+    const oldLink = linkFromEdge(oldEdge);
+    const weight = oldEdge.data?.weight ?? oldLink?.weight ?? 1;
+    const mode = oldEdge.data?.mode ?? oldLink?.mode ?? 'set';
+    const nextEdge: ShaderFlowEdge = {
+      ...edgeFromLink({
+        from: link.from,
+        to: link.to,
+        weight,
+        mode,
+      }),
+      selected: true,
+      reconnectable: true,
+      data: {
+        weight,
+        mode,
+        onWeightChange: updateEdgeWeight,
+        onModeChange: updateEdgeMode,
+        onInsertNode: insertNodeOnEdge,
+      },
+    };
+    const nextLink = linkFromEdge(nextEdge);
+    if (!nextLink) return;
+    const nextEdgeId = edgeId(nextLink);
+    if (oldEdge.id === nextEdgeId && oldLink && samePatchLink(oldLink, nextLink)) return;
+
+    const shouldDuplicate = reconnectDuplicateRef.current;
+
+    commitHistory();
+    setNodes((current) => current.map((node) => ({ ...node, selected: false })));
+    setEdges((current) => {
+      const duplicate = current.find((edge) => {
+        if (edge.id === oldEdge.id) return false;
+        const existing = linkFromEdge(edge);
+        return existing ? samePatchLink(existing, nextLink) : false;
+      });
+
+      if (duplicate) {
+        return current
+          .filter((edge) => shouldDuplicate || edge.id !== oldEdge.id)
+          .map((edge) => ({ ...edge, selected: edge.id === duplicate.id }));
+      }
+
+      if (shouldDuplicate) {
+        return dedupeEdges([
+          ...current.map((edge) => ({ ...edge, selected: false })),
+          nextEdge,
+        ]);
+      }
+
+      return dedupeEdges(current.map((edge) => (
+        edge.id === oldEdge.id
+          ? nextEdge
+          : { ...edge, selected: false }
+      )));
+    });
+    setSelectedBoundaryPort(null);
+  }, [commitHistory, insertNodeOnEdge, updateEdgeMode, updateEdgeWeight]);
+
   const deleteSelectedBoundaryPort = useCallback(() => {
     const selected = selectedBoundaryPort;
     if (!selected) return false;
@@ -1860,6 +2055,18 @@ function NodeEditorInner() {
     void document.documentElement.requestFullscreen();
   }, []);
 
+  const fitGraphToView = useCallback(() => {
+    if (!reactFlow) return;
+
+    window.setTimeout(() => {
+      void reactFlow.fitView({ padding: 0.2 }).then(() => {
+        const nextViewport = reactFlow.getViewport();
+        setViewportForBounds(nextViewport);
+        setViewport(nextViewport);
+      });
+    }, 0);
+  }, [reactFlow]);
+
   useEffect(() => {
     const handleAppShortcutKeyDown = (event: KeyboardEvent) => {
       if (event.repeat || isEditableEventTarget(event.target)) return;
@@ -1928,10 +2135,25 @@ function NodeEditorInner() {
     setEditingStack([]);
     setEditingTypeNodeId(null);
     setImportError(null);
-  }, [commitHistory, insertNodeOnEdge, insertNodeOnPort, updateBoundaryPortName, updateBoundaryPortOrder, updateEdgeWeight, updateNodeId, updateNodeParam, updateNodeType]);
+    if (loadedPatch.name) {
+      setPatchName(loadedPatch.name);
+    }
+    fitGraphToView();
+  }, [
+    commitHistory,
+    fitGraphToView,
+    insertNodeOnEdge,
+    insertNodeOnPort,
+    updateBoundaryPortName,
+    updateBoundaryPortOrder,
+    updateEdgeWeight,
+    updateNodeId,
+    updateNodeParam,
+    updateNodeType,
+  ]);
 
   const savePatchJson = useCallback(() => {
-    const blob = new Blob([patchJson], { type: 'application/json' });
+    const blob = new Blob([exportedPatchJson], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
@@ -1940,7 +2162,7 @@ function NodeEditorInner() {
     link.click();
     link.remove();
     URL.revokeObjectURL(url);
-  }, [patchJson, rootPatchName]);
+  }, [exportedPatchJson, rootPatchName]);
 
   const loadPatchFile = useCallback(async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.currentTarget.files?.[0];
@@ -1953,6 +2175,142 @@ function NodeEditorInner() {
       setImportError(error instanceof Error ? error.message : String(error));
     }
   }, [loadPatchJson]);
+
+  const newPatch = useCallback(() => {
+    if (!window.confirm('Start a new empty patch? Unsaved changes will be lost.')) return;
+
+    const emptyPatch = emptyRootPatch();
+    setNodes(toFlowNodes(
+      emptyPatch,
+      updateNodeParam,
+      updateNodeType,
+      setEditingTypeNodeId,
+      () => setEditingTypeNodeId(null),
+      updateNodeId,
+      insertNodeOnPort,
+      updateBoundaryPortName,
+      updateBoundaryPortOrder,
+      null,
+    ));
+    setEdges(toFlowEdges(emptyPatch, updateEdgeWeight, insertNodeOnEdge));
+    setEditingStack([]);
+    setPatchName('untitled-patch');
+    setEditingTypeNodeId(null);
+    setPendingBoundaryPort(null);
+    setSelectedBoundaryPort(null);
+    updateDraftNodeConnection(null);
+    updateDuplicateDrag(null);
+    setSubpatchImportModal(null);
+    setImportError(null);
+    copiedGraphRef.current = null;
+    pasteCountRef.current = 0;
+    historyGroupRef.current = null;
+    nodeDragHistoryRef.current = false;
+    setHistory({ past: [], future: [] });
+    fitGraphToView();
+  }, [
+    fitGraphToView,
+    insertNodeOnEdge,
+    insertNodeOnPort,
+    updateBoundaryPortName,
+    updateBoundaryPortOrder,
+    updateDraftNodeConnection,
+    updateDuplicateDrag,
+    updateEdgeWeight,
+    updateNodeId,
+    updateNodeParam,
+    updateNodeType,
+  ]);
+
+  const loadSubpatchImportFile = useCallback(async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = '';
+    if (!file) return;
+
+    try {
+      const importedPatch = parsePatchJson(await file.text());
+      const candidates = collectSubpatchImportCandidates(importedPatch);
+      setSubpatchImportModal({
+        fileName: file.name,
+        candidates,
+        selectedKey: candidates[0]?.key ?? null,
+        error: candidates.length === 0 ? 'No subpatches found in this patch.' : null,
+      });
+      setImportError(null);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setSubpatchImportModal({
+        fileName: file.name,
+        candidates: [],
+        selectedKey: null,
+        error: message,
+      });
+      setImportError(message);
+    }
+  }, []);
+
+  const closeSubpatchImportModal = useCallback(() => {
+    setSubpatchImportModal(null);
+  }, []);
+
+  const importSubpatchCandidate = useCallback((candidate: ImportedSubpatchCandidate) => {
+    const existingIds = new Set(nodesRef.current.map((node) => node.id));
+    const id = makeNodeId('Group', existingIds);
+    const position = flowPositionForNewImport(reactFlow, editorShellRef.current, nodesRef.current);
+    const inputDefinitions = boundaryPortDefinitions(candidate.subpatch, 'Ins', 'outputs');
+    const outputDefinitions = boundaryPortDefinitions(candidate.subpatch, 'Outs', 'inputs').map((port) => ({
+      name: port.name,
+      ...(port.connectable === undefined ? {} : { connectable: port.connectable }),
+      ...(port.min === undefined ? {} : { min: port.min }),
+      ...(port.max === undefined ? {} : { max: port.max }),
+      ...(port.integer === undefined ? {} : { integer: port.integer }),
+    }));
+    const importedNode: ShaderFlowNode = {
+      id,
+      type: 'shaderNode',
+      position,
+      selected: true,
+      data: {
+        patchNode: {
+          id,
+          type: 'Group',
+          subpatchName: candidate.name,
+          subpatchCloneId: makeSubpatchCloneId(id),
+          params: Object.fromEntries(inputDefinitions.map((port) => [port.name, port.defaultValue ?? 0])),
+          position,
+          inputs: inputDefinitions,
+          outputs: outputDefinitions,
+          subpatch: clonePatch(candidate.subpatch),
+        },
+        onParamChange: updateParamPlaceholder,
+        onTypeChange: updateTypePlaceholder,
+        onTypeEditStart: updateTypeEditStartPlaceholder,
+        onTypeEditEnd: updateTypeEditEndPlaceholder,
+        onIdChange: updateIdPlaceholder,
+        onPortDoubleClick: portDoubleClickPlaceholder,
+        onPortNameChange: portNameChangePlaceholder,
+        onPortMove: portMovePlaceholder,
+        isTypePickerOpen: false,
+      },
+    };
+
+    commitHistory();
+    setNodes((current) => [
+      ...current.map((node) => ({ ...node, selected: false })),
+      importedNode,
+    ]);
+    setEdges((current) => current.map((edge) => ({ ...edge, selected: false })));
+    setEditingTypeNodeId(null);
+    setSubpatchImportModal(null);
+  }, [commitHistory, reactFlow]);
+
+  const importSelectedSubpatch = useCallback(() => {
+    const selectedKey = subpatchImportModal?.selectedKey;
+    const candidate = subpatchImportModal?.candidates.find((entry) => entry.key === selectedKey);
+    if (!candidate) return;
+
+    importSubpatchCandidate(candidate);
+  }, [importSubpatchCandidate, subpatchImportModal]);
 
   const restoreSnapshot = useCallback((snapshot: GraphSnapshot) => {
     const state: PersistedEditorState = {
@@ -2121,6 +2479,22 @@ function NodeEditorInner() {
     };
   }, [copySelectedNodes, pasteCopiedNodes]);
 
+  useEffect(() => {
+    if (!subpatchImportModal) return;
+
+    const handleImportModalKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      event.stopPropagation();
+      setSubpatchImportModal(null);
+    };
+
+    window.addEventListener('keydown', handleImportModalKeyDown, { capture: true });
+    return () => {
+      window.removeEventListener('keydown', handleImportModalKeyDown, { capture: true });
+    };
+  }, [subpatchImportModal]);
+
   const shellClassName = [
     'app-shell',
     sidePanelOpen && !uiHidden ? '' : 'app-shell-panel-closed',
@@ -2226,6 +2600,15 @@ function NodeEditorInner() {
           <button
             className="viewport-button"
             type="button"
+            onClick={newPatch}
+            aria-label="New empty patch"
+            title="New empty patch"
+          >
+            NW
+          </button>
+          <button
+            className="viewport-button"
+            type="button"
             onClick={savePatchJson}
             aria-label="Save patch JSON"
             title="Save patch JSON"
@@ -2240,6 +2623,15 @@ function NodeEditorInner() {
             title="Load patch JSON"
           >
             LD
+          </button>
+          <button
+            className="viewport-button"
+            type="button"
+            onClick={() => importFileInputRef.current?.click()}
+            aria-label="Import subpatch from patch JSON"
+            title="Import subpatch"
+          >
+            IM
           </button>
           <button
             className="viewport-button viewport-button-history"
@@ -2286,6 +2678,13 @@ function NodeEditorInner() {
             accept="application/json,.json"
             onChange={loadPatchFile}
           />
+          <input
+            ref={importFileInputRef}
+            className="panel-file-input"
+            type="file"
+            accept="application/json,.json"
+            onChange={loadSubpatchImportFile}
+          />
         </div>
         {visualizationVisible ? <div className="fps-counter">{fps} FPS</div> : null}
         <div
@@ -2317,6 +2716,10 @@ function NodeEditorInner() {
             onConnect={onConnect}
             onConnectStart={onConnectStart}
             onConnectEnd={onConnectEnd}
+            onReconnect={onReconnect}
+            onReconnectStart={onReconnectStart}
+            onReconnectEnd={onReconnectEnd}
+            reconnectRadius={12}
             onMove={(_, nextViewport) => setViewportForBounds(nextViewport)}
             onMoveEnd={(_, nextViewport) => {
               setViewportForBounds(nextViewport);
@@ -2349,6 +2752,81 @@ function NodeEditorInner() {
           compileErrors={compileResult.errors}
           importError={importError}
         />
+      ) : null}
+      {subpatchImportModal ? (
+        <div
+          className="import-modal-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              closeSubpatchImportModal();
+            }
+          }}
+        >
+          <section
+            className="import-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="import-modal-title"
+          >
+            <header className="import-modal-header">
+              <div>
+                <h2 id="import-modal-title">Import subpatch</h2>
+                <p>{subpatchImportModal.fileName}</p>
+              </div>
+              <button
+                className="import-modal-close"
+                type="button"
+                onClick={closeSubpatchImportModal}
+                aria-label="Close import modal"
+                title="Close"
+              >
+                X
+              </button>
+            </header>
+            {subpatchImportModal.error ? (
+              <p className="import-modal-message error">{subpatchImportModal.error}</p>
+            ) : (
+              <div className="import-subpatch-list" role="listbox" aria-label="Subpatches">
+                {subpatchImportModal.candidates.map((candidate) => (
+                  <button
+                    className={[
+                      'import-subpatch-option',
+                      candidate.key === subpatchImportModal.selectedKey ? 'import-subpatch-option-selected' : '',
+                    ].filter(Boolean).join(' ')}
+                    key={candidate.key}
+                    type="button"
+                    role="option"
+                    aria-selected={candidate.key === subpatchImportModal.selectedKey}
+                    onClick={() => {
+                      setSubpatchImportModal((current) => current ? {
+                        ...current,
+                        selectedKey: candidate.key,
+                      } : current);
+                    }}
+                    onDoubleClick={() => importSubpatchCandidate(candidate)}
+                  >
+                    <span className="import-subpatch-name">{candidate.name}</span>
+                    <span className="import-subpatch-path">{candidate.path}</span>
+                    <span className="import-subpatch-meta">
+                      {candidate.inputCount} in / {candidate.outputCount} out / {candidate.nodeCount} nodes
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+            <footer className="import-modal-actions">
+              <button type="button" onClick={closeSubpatchImportModal}>Cancel</button>
+              <button
+                type="button"
+                onClick={importSelectedSubpatch}
+                disabled={!subpatchImportModal.selectedKey || subpatchImportModal.candidates.length === 0}
+              >
+                Import
+              </button>
+            </footer>
+          </section>
+        </div>
       ) : null}
     </main>
   );
@@ -2499,6 +2977,27 @@ function edgeFromLink(link: NonNullable<ReturnType<typeof linkFromEdge>>): Shade
   };
 }
 
+function reconnectPreviewFromEdge(edge: ShaderFlowEdge): ShaderFlowEdge {
+  return {
+    ...edge,
+    id: `reconnect-preview:${edge.id}`,
+    selected: false,
+    selectable: false,
+    deletable: false,
+    reconnectable: false,
+    className: [edge.className ?? 'shader-edge', 'shader-edge-reconnect-preview'].filter(Boolean).join(' '),
+    data: {
+      weight: edge.data?.weight ?? 1,
+      mode: edge.data?.mode ?? 'set',
+      onWeightChange: edge.data?.onWeightChange ?? updateEdgeWeightPlaceholder,
+      onModeChange: edge.data?.onModeChange ?? updateEdgeModePlaceholder,
+      onInsertNode: edge.data?.onInsertNode ?? updateEdgeInsertPlaceholder,
+      isFeedback: edge.data?.isFeedback,
+      showLinkControls: false,
+    },
+  };
+}
+
 function materializeRootGraph(
   activeNodes: ShaderFlowNode[],
   activeEdges: ShaderFlowEdge[],
@@ -2599,6 +3098,80 @@ function applySubpatchToParent(
   }));
 
   return { nodes, edges };
+}
+
+function collectSubpatchImportCandidates(patch: Patch): ImportedSubpatchCandidate[] {
+  const candidates: ImportedSubpatchCandidate[] = [];
+
+  function visit(currentPatch: Patch, pathParts: string[]) {
+    currentPatch.nodes.forEach((node, index) => {
+      if (node.type !== 'Group' || !node.subpatch) return;
+
+      const name = node.subpatchName ?? node.id;
+      const path = [...pathParts, name];
+      const inputCount = boundaryPortDefinitions(node.subpatch, 'Ins', 'outputs').length;
+      const outputCount = boundaryPortDefinitions(node.subpatch, 'Outs', 'inputs').length;
+      candidates.push({
+        key: `${path.join('/')}:${node.id}:${index}`,
+        name,
+        path: path.join(' / '),
+        sourceNodeId: node.id,
+        subpatch: node.subpatch,
+        inputCount,
+        outputCount,
+        nodeCount: node.subpatch.nodes.length,
+      });
+
+      visit(node.subpatch, path);
+    });
+  }
+
+  visit(patch, []);
+  return candidates;
+}
+
+function flowPositionForNewImport(
+  reactFlow: ReactFlowInstance<ShaderFlowNode, ShaderFlowEdge> | null,
+  editorShell: HTMLElement | null,
+  nodes: ShaderFlowNode[],
+): { x: number; y: number } {
+  if (reactFlow && editorShell) {
+    const rect = editorShell.getBoundingClientRect();
+    return reactFlow.screenToFlowPosition({
+      x: rect.left + rect.width / 2,
+      y: rect.top + rect.height / 2,
+    });
+  }
+
+  if (nodes.length > 0) {
+    const bounds = nodeBounds(nodes);
+    return {
+      x: bounds.x + bounds.width + PASTE_OFFSET.x,
+      y: bounds.y,
+    };
+  }
+
+  return { x: 0, y: 0 };
+}
+
+function emptyRootPatch(): Patch {
+  return {
+    nodes: [
+      {
+        id: 'system_1',
+        type: 'System',
+        params: {},
+        position: { x: 40, y: 160 },
+      },
+      {
+        id: 'output_1',
+        type: 'Output',
+        params: defaultParamsFor('Output'),
+        position: { x: 360, y: 160 },
+      },
+    ],
+    links: [],
+  };
 }
 
 function emptySubpatchForGroup(groupNode: PatchNode, position: { x: number; y: number }): Patch {
@@ -3501,6 +4074,10 @@ function isCommandModifierPressed(event: { metaKey: boolean; ctrlKey: boolean; s
   return event.metaKey || event.ctrlKey || event.shiftKey;
 }
 
+function isReconnectDuplicateModifierPressed(event: { metaKey: boolean; ctrlKey: boolean }): boolean {
+  return event.metaKey || event.ctrlKey;
+}
+
 function isDuplicateModifierPressed(event: globalThis.MouseEvent | TouchEvent): boolean {
   return event instanceof MouseEvent ? event.altKey : false;
 }
@@ -3824,6 +4401,15 @@ function dedupeEdges(edges: ShaderFlowEdge[]): ShaderFlowEdge[] {
   return deduped;
 }
 
+function samePatchLink(a: PatchLink, b: PatchLink): boolean {
+  return (
+    a.from.node === b.from.node &&
+    a.from.port === b.from.port &&
+    a.to.node === b.to.node &&
+    a.to.port === b.to.port
+  );
+}
+
 function syncEditingStackMidiCcValues(
   editingStack: SubpatchEditFrame[],
   values: MidiCcValueMap,
@@ -3999,6 +4585,7 @@ function parsePatchJson(json: string): Patch {
   }
 
   return {
+    ...(typeof parsed.name === 'string' ? { name: parsed.name } : {}),
     nodes: parsed.nodes.map((node, index) => parsePatchNode(node, index)),
     links: parsed.links.map((link, index) => parsePatchLink(link, index)),
   };
@@ -4020,6 +4607,12 @@ function parsePatchNode(value: unknown, index: number): Patch['nodes'][number] {
   if (value.expression !== undefined && typeof value.expression !== 'string') {
     throw new Error(`Node "${value.id}" expression must be a string.`);
   }
+  if (value.subpatchName !== undefined && typeof value.subpatchName !== 'string') {
+    throw new Error(`Node "${value.id}" subpatchName must be a string.`);
+  }
+  if (value.subpatchCloneId !== undefined && typeof value.subpatchCloneId !== 'string') {
+    throw new Error(`Node "${value.id}" subpatchCloneId must be a string.`);
+  }
 
   const position = value.position === undefined ? undefined : parsePosition(value.position, value.id);
   const parsedInputs = value.inputs === undefined ? undefined : parsePortDefinitions(value.inputs, `Node "${value.id}" inputs`);
@@ -4038,6 +4631,8 @@ function parsePatchNode(value: unknown, index: number): Patch['nodes'][number] {
   return {
     id: value.id,
     type: value.type,
+    ...(value.subpatchName ? { subpatchName: value.subpatchName } : {}),
+    ...(value.subpatchCloneId ? { subpatchCloneId: value.subpatchCloneId } : {}),
     ...(expression !== undefined ? { expression } : {}),
     params,
     ...(position ? { position } : {}),

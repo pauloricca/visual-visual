@@ -1,4 +1,5 @@
 {
+  "name": "demo_rgb_sine",
   "nodes": [
     {
       "id": "system_1",
