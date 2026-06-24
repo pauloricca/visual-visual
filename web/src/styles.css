@@ -8,8 +8,8 @@
   --menu-bg: rgba(0, 0, 0, 0.9);
   --viewport-inset: 14px;
   --control-size: 28px;
-  --viewport-gap: var(--viewport-inset);
-  --flow-controls-width: var(--control-size);
+  --viewport-gap: 6px;
+  --flow-controls-width: calc(var(--control-size) + 2px);
   --z-react-flow: 1;
   --z-edge-controls: 25;
   --z-flow-controls: 30;
@@ -241,6 +241,9 @@ select:hover {
 }
 
 .react-flow__controls-button {
+  width: var(--control-size);
+  height: var(--control-size);
+  padding: 0;
   border-bottom: 1px solid #fff;
   background: transparent;
   color: #fff;

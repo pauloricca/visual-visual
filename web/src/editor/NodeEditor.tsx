@@ -2741,7 +2741,7 @@ function NodeEditorInner() {
             defaultViewport={initialState?.ui?.viewport}
             fitView={!initialState?.ui?.viewport}
           >
-            <Controls />
+            <Controls showInteractive={false} />
           </ReactFlow>
         </EdgeOverlayProvider>
       </section>
