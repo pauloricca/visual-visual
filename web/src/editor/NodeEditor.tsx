@@ -645,6 +645,36 @@ function NodeEditorInner() {
     setEditingTypeNodeId((current) => current === nodeId ? nextId : current);
   }, [commitHistory, nodes]);
 
+  const updateGroupSubpatchName = useCallback((nodeId: string, requestedName: string) => {
+    const relatedNode = nodes.find((node) => node.id === nodeId);
+    if (!relatedNode || relatedNode.data.patchNode.type !== 'Group') return;
+
+    const nextName = normalizeSubpatchName(requestedName, relatedNode.data.patchNode.subpatchName ?? nodeId);
+    if (nextName === relatedNode.data.patchNode.subpatchName) return;
+
+    const cloneId = relatedNode.data.patchNode.subpatchCloneId;
+    commitHistory();
+    setNodes((current) => current.map((node) => {
+      const isLinkedGroup = node.id === nodeId || (
+        cloneId !== undefined &&
+        node.data.patchNode.type === 'Group' &&
+        node.data.patchNode.subpatchCloneId === cloneId
+      );
+      if (!isLinkedGroup) return node;
+
+      return {
+        ...node,
+        data: {
+          ...node.data,
+          patchNode: {
+            ...node.data.patchNode,
+            subpatchName: nextName,
+          },
+        },
+      };
+    }));
+  }, [commitHistory, nodes]);
+
   const updateBoundaryPortName = useCallback((nodeId: string, side: 'input' | 'output', port: string, requestedPort: string) => {
     const relatedNode = nodesRef.current.find((node) => node.id === nodeId);
     if (!relatedNode || !canRenameBoundaryPort(relatedNode.data.patchNode as PatchNode, side)) return;
@@ -776,6 +806,7 @@ function NodeEditorInner() {
         },
         onParamChange: updateNodeParam,
         onTypeChange: updateNodeType,
+        onSubpatchNameChange: updateGroupSubpatchName,
         onTypeEditStart: setEditingTypeNodeId,
         onTypeEditEnd: () => setEditingTypeNodeId(null),
         onIdChange: updateNodeId,
@@ -783,6 +814,7 @@ function NodeEditorInner() {
         onPortNameChange: portNameChangePlaceholder,
         onPortMove: portMovePlaceholder,
         isTypePickerOpen: true,
+        isEditingSubpatch: editingStack.length > 0,
       },
     };
 
@@ -810,7 +842,7 @@ function NodeEditorInner() {
     setNodes((current) => [...current, insertedNode]);
     setEdges(dedupeEdges(rewiredEdges));
     setEditingTypeNodeId(id);
-  }, [commitHistory, edges, nodes, updateNodeId, updateNodeParam, updateNodeType]);
+  }, [commitHistory, edges, editingStack.length, nodes, updateGroupSubpatchName, updateNodeId, updateNodeParam, updateNodeType]);
 
   const insertNodeOnPort = useCallback((nodeId: string, side: 'input' | 'output', port: string) => {
     const relatedEdges = edges
@@ -854,6 +886,7 @@ function NodeEditorInner() {
         },
         onParamChange: updateNodeParam,
         onTypeChange: updateNodeType,
+        onSubpatchNameChange: updateGroupSubpatchName,
         onTypeEditStart: setEditingTypeNodeId,
         onTypeEditEnd: () => setEditingTypeNodeId(null),
         onIdChange: updateNodeId,
@@ -861,6 +894,7 @@ function NodeEditorInner() {
         onPortNameChange: portNameChangePlaceholder,
         onPortMove: portMovePlaceholder,
         isTypePickerOpen: true,
+        isEditingSubpatch: editingStack.length > 0,
       },
     };
 
@@ -868,7 +902,7 @@ function NodeEditorInner() {
     setNodes((current) => [...current, insertedNode]);
     setEdges((current) => dedupeEdges([...current, edgeFromLink(link)]));
     setEditingTypeNodeId(id);
-  }, [commitHistory, reactFlow, updateNodeId, updateNodeParam, updateNodeType]);
+  }, [commitHistory, editingStack.length, reactFlow, updateGroupSubpatchName, updateNodeId, updateNodeParam, updateNodeType]);
 
   const materializePendingBoundaryPort = useCallback((pending: BoundaryPortSelection): void => {
     const relatedNode = nodesRef.current.find((node) => node.id === pending.nodeId);
@@ -1311,6 +1345,7 @@ function NodeEditorInner() {
           onExpressionChange: updateNodeExpression,
           onExpressionCommit: commitNodeExpression,
           onTypeChange: updateNodeType,
+          onSubpatchNameChange: updateGroupSubpatchName,
           onTypeEditStart: setEditingTypeNodeId,
           onTypeEditEnd: () => setEditingTypeNodeId(null),
           onIdChange: updateNodeId,
@@ -1328,9 +1363,11 @@ function NodeEditorInner() {
             ? { side: pendingBoundaryPort.side, name: pendingBoundaryPort.port }
             : null,
           isTypePickerOpen: editingTypeNodeId === node.id,
+          isEditingSubpatch: editingStack.length > 0,
         },
       })),
     [
+      editingStack.length,
       editingTypeNodeId,
       insertNodeOnPort,
       nodes,
@@ -1341,6 +1378,7 @@ function NodeEditorInner() {
       updateBoundaryPortName,
       updateBoundaryPortOrder,
       updateNodeExpression,
+      updateGroupSubpatchName,
       updateNodeId,
       updateNodeParam,
       updateNodeType,
@@ -2031,6 +2069,7 @@ function NodeEditorInner() {
             },
             onParamChange: updateNodeParam,
             onTypeChange: updateNodeType,
+            onSubpatchNameChange: updateGroupSubpatchName,
             onTypeEditStart: setEditingTypeNodeId,
             onTypeEditEnd: () => setEditingTypeNodeId(null),
             onIdChange: updateNodeId,
@@ -2038,12 +2077,13 @@ function NodeEditorInner() {
             onPortNameChange: updateBoundaryPortName,
             onPortMove: updateBoundaryPortOrder,
             isTypePickerOpen: true,
+            isEditingSubpatch: editingStack.length > 0,
           },
         },
       ]);
       setEditingTypeNodeId(id);
     },
-    [commitHistory, insertNodeOnPort, nodes, reactFlow, updateBoundaryPortName, updateBoundaryPortOrder, updateNodeId, updateNodeParam, updateNodeType],
+    [commitHistory, editingStack.length, insertNodeOnPort, nodes, reactFlow, updateBoundaryPortName, updateBoundaryPortOrder, updateGroupSubpatchName, updateNodeId, updateNodeParam, updateNodeType],
   );
 
   const toggleFullscreen = useCallback(() => {

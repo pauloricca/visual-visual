@@ -181,10 +181,14 @@ export function ShaderNode({ data, selected, dragging }: NodeProps<ShaderFlowNod
         <NodeTypePicker
           nodeType={node.type}
           displayLabel={node.type === 'Group' ? (node.subpatchName ?? node.id) : undefined}
+          isEditingSubpatch={data.isEditingSubpatch === true}
           open={data.isTypePickerOpen}
           onOpen={() => data.onTypeEditStart(node.id)}
           onClose={data.onTypeEditEnd}
           onChange={(type) => data.onTypeChange(node.id, type)}
+          onCustomLabelCommit={node.type === 'Group'
+            ? (nextName) => data.onSubpatchNameChange?.(node.id, nextName)
+            : undefined}
         />
         {headerOutputPort ? (
           <Handle
@@ -436,10 +440,12 @@ export function ShaderNode({ data, selected, dragging }: NodeProps<ShaderFlowNod
 interface NodeTypePickerProps {
   nodeType: NodeType | null;
   displayLabel?: string;
+  isEditingSubpatch: boolean;
   open: boolean;
   onOpen: () => void;
   onClose: () => void;
   onChange: (type: NodeType) => void;
+  onCustomLabelCommit?: (label: string) => void;
 }
 
 interface PortNameLabelProps {
@@ -552,7 +558,16 @@ function PortNameLabel({
   );
 }
 
-function NodeTypePicker({ nodeType, displayLabel, open, onOpen, onClose, onChange }: NodeTypePickerProps) {
+function NodeTypePicker({
+  nodeType,
+  displayLabel,
+  isEditingSubpatch,
+  open,
+  onOpen,
+  onClose,
+  onChange,
+  onCustomLabelCommit,
+}: NodeTypePickerProps) {
   const nodeTypeLabel = nodeType ? getNodeTypeLabel(nodeType) : 'type';
   const pickerLabel = displayLabel ?? nodeTypeLabel;
   const [query, setQuery] = useState<string>(nodeType ? pickerLabel : '');
@@ -566,12 +581,15 @@ function NodeTypePicker({ nodeType, displayLabel, open, onOpen, onClose, onChang
     ? nodeTypeLabel
     : query;
   const options = useMemo(() => NODE_TYPE_LIST.filter((type) => {
+    if (type === 'Group') return false;
+    if ((type === 'Ins' || type === 'Outs') && !isEditingSubpatch) return false;
+
     const normalizedQuery = searchQuery.trim().toLowerCase();
     return (
       type.toLowerCase().includes(normalizedQuery) ||
       getNodeTypeLabel(type).toLowerCase().includes(normalizedQuery)
     );
-  }), [searchQuery]);
+  }), [isEditingSubpatch, searchQuery]);
   useEffect(() => {
     if (!open) {
       setQuery(nodeType ? pickerLabel : '');
@@ -609,6 +627,20 @@ function NodeTypePicker({ nodeType, displayLabel, open, onOpen, onClose, onChang
     onClose();
   }
 
+  function commitCustomLabel(): boolean {
+    const label = query.trim();
+    if (!onCustomLabelCommit || label.length === 0) return false;
+
+    onCustomLabelCommit(label);
+    onClose();
+    return true;
+  }
+
+  function closeOrCommitCustomLabel() {
+    if (options.length === 0 && commitCustomLabel()) return;
+    onClose();
+  }
+
   function handleKeyDown(event: KeyboardEvent<HTMLInputElement>) {
     event.stopPropagation();
     if (event.key === 'ArrowDown') {
@@ -624,6 +656,8 @@ function NodeTypePicker({ nodeType, displayLabel, open, onOpen, onClose, onChang
       const selectedType = options[highlightedIndex] ?? options[0];
       if (selectedType) {
         choose(selectedType);
+      } else {
+        commitCustomLabel();
       }
     }
     if (event.key === 'Escape') {
@@ -694,7 +728,7 @@ function NodeTypePicker({ nodeType, displayLabel, open, onOpen, onClose, onChang
               menuRef.current.scrollTop = 0;
             }
           }}
-          onBlur={onClose}
+          onBlur={closeOrCommitCustomLabel}
           onFocus={(event) => event.currentTarget.select()}
           onKeyDown={handleKeyDown}
           onPointerDown={(event) => event.stopPropagation()}

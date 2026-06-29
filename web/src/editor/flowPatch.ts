@@ -11,6 +11,7 @@ export interface ShaderNodeData extends Record<string, unknown> {
   onExpressionChange?: (nodeId: string, expression: string) => void;
   onExpressionCommit?: (nodeId: string, expression: string) => void;
   onTypeChange: (nodeId: string, type: NodeType) => void;
+  onSubpatchNameChange?: (nodeId: string, nextName: string) => void;
   onTypeEditStart: (nodeId: string) => void;
   onTypeEditEnd: () => void;
   onIdChange: (nodeId: string, nextId: string) => void;
@@ -22,6 +23,7 @@ export interface ShaderNodeData extends Record<string, unknown> {
   selectedLinkPorts?: { inputs: string[]; outputs: string[] };
   previewPort?: { side: 'input' | 'output'; name: string } | null;
   isTypePickerOpen: boolean;
+  isEditingSubpatch?: boolean;
 }
 
 export type ShaderFlowNode = Node<ShaderNodeData, 'shaderNode'>;
