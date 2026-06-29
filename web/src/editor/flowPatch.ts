@@ -234,9 +234,13 @@ export function flowToEditorState(
 export function patchFromFlow(nodes: ShaderFlowNode[], edges: ShaderFlowEdge[]): Patch {
   const patchNodes: PatchNode[] = [];
   const typedNodeIds = new Set<string>();
+  const passthroughNodeIds = new Set<string>();
   for (const node of nodes) {
     const patchNode = node.data.patchNode;
-    if (patchNode.type === null) continue;
+    if (patchNode.type === null) {
+      passthroughNodeIds.add(patchNode.id);
+      continue;
+    }
     typedNodeIds.add(patchNode.id);
     patchNodes.push({
       id: patchNode.id,
@@ -252,16 +256,91 @@ export function patchFromFlow(nodes: ShaderFlowNode[], edges: ShaderFlowEdge[]):
     });
   }
 
+  const links = edges
+    .map(linkFromEdge)
+    .filter((link): link is PatchLink => link !== null);
+
   return {
     nodes: patchNodes,
-    links: edges
-      .map(linkFromEdge)
-      .filter((link): link is PatchLink => (
-        link !== null &&
-        typedNodeIds.has(link.from.node) &&
-        typedNodeIds.has(link.to.node)
-      )),
+    links: materializeTypedLinks(links, typedNodeIds, passthroughNodeIds),
   };
+}
+
+function materializeTypedLinks(
+  links: PatchLink[],
+  typedNodeIds: Set<string>,
+  passthroughNodeIds: Set<string>,
+): PatchLink[] {
+  const outgoing = new Map<string, PatchLink[]>();
+  for (const link of links) {
+    outgoing.set(link.from.node, [...(outgoing.get(link.from.node) ?? []), link]);
+  }
+
+  const materialized: PatchLink[] = [];
+  for (const link of links) {
+    if (!typedNodeIds.has(link.from.node)) continue;
+
+    if (typedNodeIds.has(link.to.node)) {
+      materialized.push(link);
+      continue;
+    }
+
+    if (!passthroughNodeIds.has(link.to.node)) continue;
+
+    for (const downstream of resolvePassthroughLinks(link.to.node, outgoing, typedNodeIds, passthroughNodeIds, new Set())) {
+      if (link.from.node === downstream.to.node) continue;
+      materialized.push({
+        from: link.from,
+        to: downstream.to,
+        weight: downstream.weight,
+        mode: downstream.mode,
+      });
+    }
+  }
+
+  return dedupePatchLinks(materialized);
+}
+
+function resolvePassthroughLinks(
+  nodeId: string,
+  outgoing: Map<string, PatchLink[]>,
+  typedNodeIds: Set<string>,
+  passthroughNodeIds: Set<string>,
+  visited: Set<string>,
+): PatchLink[] {
+  if (visited.has(nodeId)) return [];
+
+  const nextVisited = new Set(visited);
+  nextVisited.add(nodeId);
+  const resolved: PatchLink[] = [];
+
+  for (const link of outgoing.get(nodeId) ?? []) {
+    if (typedNodeIds.has(link.to.node)) {
+      resolved.push(link);
+      continue;
+    }
+
+    if (passthroughNodeIds.has(link.to.node)) {
+      resolved.push(...resolvePassthroughLinks(link.to.node, outgoing, typedNodeIds, passthroughNodeIds, nextVisited));
+    }
+  }
+
+  return resolved;
+}
+
+function dedupePatchLinks(links: PatchLink[]): PatchLink[] {
+  const deduped: PatchLink[] = [];
+  const seen = new Set<string>();
+
+  for (const link of links) {
+    const key = edgeId(link);
+    if (seen.has(key)) continue;
+
+    seen.add(key);
+    deduped.push(link);
+  }
+
+  return deduped;
 }
 
 export function linkFromEdge(edge: Edge): PatchLink | null {

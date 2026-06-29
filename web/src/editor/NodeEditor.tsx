@@ -14,6 +14,7 @@ import {
   ReactFlowInstance,
   ReactFlowProvider,
   SelectionMode,
+  useConnection,
   Viewport,
   type CoordinateExtent,
 } from '@xyflow/react';
@@ -100,6 +101,17 @@ interface BoundaryPortSelection {
   nodeId: string;
   side: 'input' | 'output';
   port: string;
+}
+
+interface ReconnectHoverHandle {
+  nodeId: string;
+  id: string | null;
+  type: HandleType;
+}
+
+interface ReconnectHoverState {
+  fromHandle: ReconnectHoverHandle;
+  toHandle: ReconnectHoverHandle;
 }
 
 interface CopiedGraph {
@@ -201,6 +213,7 @@ function NodeEditorInner() {
   const reconnectingEdgeRef = useRef(false);
   const reconnectDuplicateRef = useRef(false);
   const reconnectPreviewSourceRef = useRef<ShaderFlowEdge | null>(null);
+  const cancelableTypelessNodeIdRef = useRef<string | null>(null);
   const historyGroupRef = useRef<{ key: string; time: number } | null>(null);
   const nodeDragHistoryRef = useRef(false);
   const edgeSelectionTimeoutRef = useRef<number | null>(null);
@@ -214,6 +227,22 @@ function NodeEditorInner() {
   const [selectedBoundaryPort, setSelectedBoundaryPort] = useState<BoundaryPortSelection | null>(null);
   const [duplicateDrag, setDuplicateDrag] = useState<DuplicateDragState | null>(null);
   const [reconnectPreviewEdge, setReconnectPreviewEdge] = useState<ShaderFlowEdge | null>(null);
+  const [reconnectDuplicateActive, setReconnectDuplicateActive] = useState(false);
+  const reconnectHoverKey = useConnection((connection): string | null => {
+    if (!connection.inProgress || connection.isValid !== true || !connection.fromHandle || !connection.toHandle) {
+      return null;
+    }
+
+    return JSON.stringify([
+      connection.fromHandle.nodeId,
+      connection.fromHandle.id ?? null,
+      connection.fromHandle.type,
+      connection.toHandle.nodeId,
+      connection.toHandle.id ?? null,
+      connection.toHandle.type,
+    ]);
+  });
+  const reconnectHover = useMemo(() => parseReconnectHoverKey(reconnectHoverKey), [reconnectHoverKey]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const importFileInputRef = useRef<HTMLInputElement | null>(null);
   const editorShellRef = useRef<HTMLElement | null>(null);
@@ -539,6 +568,10 @@ function NodeEditorInner() {
     const nextId = uniqueNodeId(requestedId, nodeId, nodes);
     if (!nextId || nextId === nodeId) return;
 
+    if (cancelableTypelessNodeIdRef.current === nodeId) {
+      cancelableTypelessNodeIdRef.current = nextId;
+    }
+
     commitHistory();
     setNodes((current) =>
       current.map((node) =>
@@ -578,6 +611,10 @@ function NodeEditorInner() {
     const nextId = shouldAutoRenameForTypeChange(nodeId, previousType)
       ? nextTypeNodeId(nodeId, type, nodes)
       : nodeId;
+
+    if (cancelableTypelessNodeIdRef.current === nodeId) {
+      cancelableTypelessNodeIdRef.current = null;
+    }
 
     commitHistory();
     setNodes((current) =>
@@ -839,8 +876,12 @@ function NodeEditorInner() {
       ];
     });
 
-    setNodes((current) => [...current, insertedNode]);
-    setEdges(dedupeEdges(rewiredEdges));
+    cancelableTypelessNodeIdRef.current = id;
+    setNodes((current) => [
+      ...current.map((node) => ({ ...node, selected: false })),
+      { ...insertedNode, selected: true },
+    ]);
+    setEdges(dedupeEdges(rewiredEdges.map((edge) => ({ ...edge, selected: false }))));
     setEditingTypeNodeId(id);
   }, [commitHistory, edges, editingStack.length, nodes, updateGroupSubpatchName, updateNodeId, updateNodeParam, updateNodeType]);
 
@@ -899,8 +940,15 @@ function NodeEditorInner() {
     };
 
     commitHistory();
-    setNodes((current) => [...current, insertedNode]);
-    setEdges((current) => dedupeEdges([...current, edgeFromLink(link)]));
+    cancelableTypelessNodeIdRef.current = id;
+    setNodes((current) => [
+      ...current.map((node) => ({ ...node, selected: false })),
+      { ...insertedNode, selected: true },
+    ]);
+    setEdges((current) => dedupeEdges([
+      ...current.map((edge) => ({ ...edge, selected: false })),
+      edgeFromLink(link),
+    ]));
     setEditingTypeNodeId(id);
   }, [commitHistory, editingStack.length, reactFlow, updateGroupSubpatchName, updateNodeId, updateNodeParam, updateNodeType]);
 
@@ -1087,6 +1135,34 @@ function NodeEditorInner() {
 
     return true;
   }, [commitHistory]);
+
+  const cancelFreshTypelessNode = useCallback(() => {
+    const nodeId = cancelableTypelessNodeIdRef.current;
+    if (!nodeId) return false;
+
+    const node = nodesRef.current.find((candidate) => candidate.id === nodeId);
+    if (!node || node.data.patchNode.type !== null) {
+      cancelableTypelessNodeIdRef.current = null;
+      return false;
+    }
+
+    if (editingTypeNodeId !== nodeId && !node.selected) {
+      return false;
+    }
+
+    const canceledNodeIds = new Set([nodeId]);
+    const bridgeEdges = buildBridgeEdges(nodesRef.current, edgesRef.current, canceledNodeIds);
+    const remainingEdges = edgesRef.current.filter((edge) => {
+      const link = linkFromEdge(edge);
+      return link && !canceledNodeIds.has(link.from.node) && !canceledNodeIds.has(link.to.node);
+    });
+
+    cancelableTypelessNodeIdRef.current = null;
+    setNodes((current) => current.filter((candidate) => candidate.id !== nodeId));
+    setEdges(dedupeEdges([...remainingEdges, ...bridgeEdges]));
+    setEditingTypeNodeId((current) => current === nodeId ? null : current);
+    return true;
+  }, [editingTypeNodeId]);
 
   const copySelectedNodes = useCallback(() => {
     const selectedGraph = selectedGraphFromNodes(nodesRef.current, edgesRef.current);
@@ -1410,18 +1486,36 @@ function NodeEditorInner() {
     () => materializeRootGraph(nodesWithCallbacks, edgesWithCallbacks, editingStack, patchName),
     [edgesWithCallbacks, editingStack, nodesWithCallbacks, patchName],
   );
+  const temporaryReconnectEdge = useMemo(
+    () => temporaryReconnectEdgeFromHover(reconnectPreviewSourceRef.current, reconnectHover),
+    [reconnectHover],
+  );
+  const compileEdgesWithPreview = useMemo(
+    () => applyTemporaryReconnectEdge(
+      edgesWithCallbacks,
+      temporaryReconnectEdge,
+      reconnectPreviewSourceRef.current,
+      reconnectDuplicateActive,
+    ),
+    [edgesWithCallbacks, reconnectDuplicateActive, temporaryReconnectEdge],
+  );
+  const materializedCompileGraph = useMemo(
+    () => materializeRootGraph(nodesWithCallbacks, compileEdgesWithPreview, editingStack, patchName),
+    [compileEdgesWithPreview, editingStack, nodesWithCallbacks, patchName],
+  );
   const rootPatchName = editingStack[0]?.parentPatchName ?? patchName;
   const isEditingSubpatch = editingStack.length > 0;
   const patch = useMemo(() => patchFromFlow(materializedGraph.nodes, materializedGraph.edges), [materializedGraph]);
+  const compilePatch = useMemo(() => patchFromFlow(materializedCompileGraph.nodes, materializedCompileGraph.edges), [materializedCompileGraph]);
   const patchJson = useMemo(() => patchToJson(patch), [patch]);
   const exportedPatchJson = useMemo(() => {
     const patchWithName = { ...patch, name: rootPatchName };
     return patchToJson(patchWithName);
   }, [patch, rootPatchName]);
-  const validation = useMemo(() => validatePatch(patch), [patch]);
-  const compileResult = useMemo(() => compilePatchToGlsl(patch, 'webgl2', {
+  const validation = useMemo(() => validatePatch(compilePatch), [compilePatch]);
+  const compileResult = useMemo(() => compilePatchToGlsl(compilePatch, 'webgl2', {
     enableScopes: !uiHidden,
-  }), [patch, uiHidden]);
+  }), [compilePatch, uiHidden]);
   const projectorCompileResult = useMemo(() => compilePatchToGlsl(patch, 'webgl2', {
     enableScopes: false,
   }), [patch]);
@@ -1652,6 +1746,7 @@ function NodeEditorInner() {
       if (!reconnectingEdgeRef.current) return;
       const duplicateActive = isReconnectDuplicateModifierPressed(event);
       reconnectDuplicateRef.current = duplicateActive;
+      setReconnectDuplicateActive(duplicateActive);
       setReconnectPreviewEdge(duplicateActive && reconnectPreviewSourceRef.current
         ? reconnectPreviewFromEdge(reconnectPreviewSourceRef.current)
         : null);
@@ -1849,6 +1944,7 @@ function NodeEditorInner() {
     reconnectingEdgeRef.current = true;
     reconnectDuplicateRef.current = duplicateActive;
     reconnectPreviewSourceRef.current = edge;
+    setReconnectDuplicateActive(duplicateActive);
     setReconnectPreviewEdge(duplicateActive ? reconnectPreviewFromEdge(edge) : null);
     updateDraftNodeConnection(null);
     setPendingBoundaryPort(null);
@@ -1858,6 +1954,7 @@ function NodeEditorInner() {
     reconnectingEdgeRef.current = false;
     reconnectDuplicateRef.current = false;
     reconnectPreviewSourceRef.current = null;
+    setReconnectDuplicateActive(false);
     setReconnectPreviewEdge(null);
     updateDraftNodeConnection(null);
     setPendingBoundaryPort(null);
@@ -2054,12 +2151,14 @@ function NodeEditorInner() {
       const existing = new Set(nodes.map((node) => node.id));
       const id = makeNodeId('node', existing);
       const position = reactFlow.screenToFlowPosition({ x: event.clientX, y: event.clientY });
+      cancelableTypelessNodeIdRef.current = id;
       setNodes((current) => [
-        ...current,
+        ...current.map((node) => ({ ...node, selected: false })),
         {
           id,
           type: 'shaderNode',
           position,
+          selected: true,
           data: {
             patchNode: {
               id,
@@ -2455,7 +2554,7 @@ function NodeEditorInner() {
   useEffect(() => {
     const handleBridgeDeleteKeyDown = (event: KeyboardEvent) => {
       if (isEditableEventTarget(event.target)) return;
-      if (event.key !== 'Backspace') return;
+      if (event.key !== 'Backspace' && event.key !== 'Delete') return;
       if (!event.metaKey && !event.ctrlKey) return;
       if (!deleteSelectedNodesWithBridge()) return;
 
@@ -2518,6 +2617,21 @@ function NodeEditorInner() {
       window.removeEventListener('keydown', handleClipboardKeyDown, { capture: true });
     };
   }, [copySelectedNodes, pasteCopiedNodes]);
+
+  useEffect(() => {
+    const handleCancelFreshTypelessNodeKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      if (!cancelFreshTypelessNode()) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+    };
+
+    window.addEventListener('keydown', handleCancelFreshTypelessNodeKeyDown, { capture: true });
+    return () => {
+      window.removeEventListener('keydown', handleCancelFreshTypelessNodeKeyDown, { capture: true });
+    };
+  }, [cancelFreshTypelessNode]);
 
   useEffect(() => {
     if (!subpatchImportModal) return;
@@ -3036,6 +3150,88 @@ function reconnectPreviewFromEdge(edge: ShaderFlowEdge): ShaderFlowEdge {
       showLinkControls: false,
     },
   };
+}
+
+function parseReconnectHoverKey(key: string | null): ReconnectHoverState | null {
+  if (!key) return null;
+
+  const value = JSON.parse(key) as unknown;
+  if (!Array.isArray(value) || value.length !== 6) return null;
+
+  const [fromNodeId, fromHandleId, fromType, toNodeId, toHandleId, toType] = value;
+  if (
+    typeof fromNodeId !== 'string' ||
+    (fromHandleId !== null && typeof fromHandleId !== 'string') ||
+    (fromType !== 'source' && fromType !== 'target') ||
+    typeof toNodeId !== 'string' ||
+    (toHandleId !== null && typeof toHandleId !== 'string') ||
+    (toType !== 'source' && toType !== 'target')
+  ) {
+    return null;
+  }
+
+  return {
+    fromHandle: {
+      nodeId: fromNodeId,
+      id: fromHandleId,
+      type: fromType,
+    },
+    toHandle: {
+      nodeId: toNodeId,
+      id: toHandleId,
+      type: toType,
+    },
+  };
+}
+
+function temporaryReconnectEdgeFromHover(
+  sourceEdge: ShaderFlowEdge | null,
+  hover: ReconnectHoverState | null,
+): ShaderFlowEdge | null {
+  if (!sourceEdge || !hover) return null;
+
+  const { fromHandle, toHandle } = hover;
+  const candidate = fromHandle.type === 'source'
+    ? {
+        ...sourceEdge,
+        source: fromHandle.nodeId,
+        sourceHandle: fromHandle.id,
+        target: toHandle.nodeId,
+        targetHandle: toHandle.id,
+      }
+    : {
+        ...sourceEdge,
+        source: toHandle.nodeId,
+        sourceHandle: toHandle.id,
+        target: fromHandle.nodeId,
+        targetHandle: fromHandle.id,
+      };
+  const link = linkFromEdge(candidate);
+  if (!link) return null;
+
+  return edgeFromLink({
+    from: link.from,
+    to: link.to,
+    weight: sourceEdge.data?.weight ?? link.weight ?? 1,
+    mode: sourceEdge.data?.mode ?? link.mode ?? 'set',
+  });
+}
+
+function applyTemporaryReconnectEdge(
+  edges: ShaderFlowEdge[],
+  temporaryEdge: ShaderFlowEdge | null,
+  sourceEdge: ShaderFlowEdge | null,
+  duplicate: boolean,
+): ShaderFlowEdge[] {
+  if (!temporaryEdge || !sourceEdge) return edges;
+
+  if (duplicate) {
+    return dedupeEdges([...edges, temporaryEdge]);
+  }
+
+  return dedupeEdges(edges.map((edge) => (
+    edge.id === sourceEdge.id ? temporaryEdge : edge
+  )));
 }
 
 function materializeRootGraph(
@@ -4128,13 +4324,15 @@ function buildBridgeEdges(
   selectedNodeIds: Set<string>,
 ): ShaderFlowEdge[] {
   return nodes.flatMap((node) => {
-    if (!selectedNodeIds.has(node.id) || node.data.patchNode.type === null) {
+    if (!selectedNodeIds.has(node.id)) {
       return [];
     }
 
-    const definition = getNodeDefinition(node.data.patchNode as PatchNode);
-    const inputOrder = new Map(definition.inputs.map((input, index) => [input.name, index]));
-    const outputOrder = new Map(definition.outputs.map((output, index) => [output.name, index]));
+    const definition = node.data.patchNode.type === null
+      ? null
+      : getNodeDefinition(node.data.patchNode as PatchNode);
+    const inputOrder = new Map(definition?.inputs.map((input, index) => [input.name, index]) ?? []);
+    const outputOrder = new Map(definition?.outputs.map((output, index) => [output.name, index]) ?? []);
     const relatedLinks = edges
       .map((edge, index) => ({ edge, link: linkFromEdge(edge), index }))
       .filter((entry): entry is { edge: ShaderFlowEdge; link: NonNullable<ReturnType<typeof linkFromEdge>>; index: number } => (
