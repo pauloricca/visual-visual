@@ -487,12 +487,16 @@ function emitOutput(node: PatchNode, port: string, context: CompileContext): str
       return emitPolarRepeat(node, port, context);
     case 'logPolar':
       return emitLogPolar(node, port, context);
-    case 'domainWarp':
-      return emitDomainWarp(node, port, context);
     case 'foldSymmetry':
       return emitFoldSymmetry(node, port, context);
     case 'juliaOrbitTrap':
       return emitJuliaOrbitTrap(node, port, context);
+    case 'mandelbrot':
+    case 'burningShip':
+    case 'nova':
+    case 'newton':
+    case 'lyapunov':
+      return emitFractal(node, port, context);
     case 'Quantise':
       assertPort(node, port, 'value');
       return `floor(${input(node, 'value', context)} * max(${input(node, 'levels', context)}, 1.0)) / max(${input(node, 'levels', context)}, 1.0)`;
@@ -713,22 +717,6 @@ function emitLogPolar(node: PatchNode, port: string, context: CompileContext): s
   });
 }
 
-function emitDomainWarp(node: PatchNode, port: string, context: CompileContext): string {
-  const x = input(node, 'x', context);
-  const y = input(node, 'y', context);
-  const amount = input(node, 'amount', context);
-  const freq = input(node, 'freq', context);
-  const phase = input(node, 'phase', context);
-  const args = `${x}, ${y}, ${amount}, ${freq}, ${phase}`;
-  const outX = `domainWarpX(${args})`;
-  const outY = `domainWarpY(${args})`;
-
-  return emitCoordinateOutput(node, port, outX, outY, {
-    value: `domainWarpValue(${args})`,
-    mask: `domainWarpMask(${args})`,
-  });
-}
-
 function emitFoldSymmetry(node: PatchNode, port: string, context: CompileContext): string {
   const x = input(node, 'x', context);
   const y = input(node, 'y', context);
@@ -772,6 +760,52 @@ function emitJuliaOrbitTrap(node: PatchNode, port: string, context: CompileConte
       return `juliaOrbitTrapValue(${args}, 6.0)`;
     case 'mask':
       return `juliaOrbitTrapValue(${args}, 7.0)`;
+    default:
+      throw new Error(`${node.type}.${port} is not supported.`);
+  }
+}
+
+function emitFractal(node: PatchNode, port: string, context: CompileContext): string {
+  const x = input(node, 'x', context);
+  const y = input(node, 'y', context);
+  const channel = fractalOutputChannel(node, port);
+
+  switch (node.type) {
+    case 'mandelbrot':
+      return `mandelbrotValue(${x}, ${y}, ${input(node, 'iterations', context)}, ${input(node, 'bailout', context)}, ${channel})`;
+    case 'burningShip':
+      return `burningShipValue(${x}, ${y}, ${input(node, 'iterations', context)}, ${input(node, 'bailout', context)}, ${channel})`;
+    case 'nova':
+      return `novaValue(${x}, ${y}, ${input(node, 'cx', context)}, ${input(node, 'cy', context)}, ${input(node, 'power', context)}, ${input(node, 'relax', context)}, ${input(node, 'iterations', context)}, ${input(node, 'bailout', context)}, ${channel})`;
+    case 'newton':
+      return `newtonValue(${x}, ${y}, ${input(node, 'power', context)}, ${input(node, 'relax', context)}, ${input(node, 'iterations', context)}, ${input(node, 'bailout', context)}, ${channel})`;
+    case 'lyapunov':
+      return `lyapunovValue(${x}, ${y}, ${input(node, 'aScale', context)}, ${input(node, 'bScale', context)}, ${input(node, 'seed', context)}, ${input(node, 'sequence', context)}, ${input(node, 'iterations', context)}, ${channel})`;
+    default:
+      throw new Error(`${node.type}.${port} is not supported.`);
+  }
+}
+
+function fractalOutputChannel(node: PatchNode, port: string): string {
+  switch (port) {
+    case 'outX':
+      return '0.0';
+    case 'outY':
+      return '1.0';
+    case 'minRadius':
+      return '2.0';
+    case 'escape':
+      return '3.0';
+    case 'iteration':
+      return '4.0';
+    case 'distance':
+      return '5.0';
+    case 'angle':
+      return '6.0';
+    case 'mask':
+      return '7.0';
+    case 'value':
+      return '8.0';
     default:
       throw new Error(`${node.type}.${port} is not supported.`);
   }
@@ -865,6 +899,10 @@ function emitSystem(port: string): string {
       return 'x';
     case 'y':
       return 'y';
+    case 'dx':
+      return '(1.0 / max(u_resolution.x, 1.0))';
+    case 'dy':
+      return '(1.0 / max(u_resolution.y, 1.0))';
     case 'time':
       return 'u_time';
     case 'frame':
@@ -1184,42 +1222,6 @@ float logPolarMask(float x, float y, float radialScale, float angleScale) {
   return max(gridLineMask(lx, 0.035), gridLineMask(ly, 0.035));
 }
 
-float domainWarpDeltaX(float x, float y, float freq, float phase) {
-  float px = x * freq;
-  float py = y * freq;
-  float octave1 = sin(py + phase);
-  float octave2 = 0.5 * sin(px * 2.03 + py * 1.71 + phase * 1.37);
-  float octave3 = 0.25 * cos(py * 4.11 - px * 1.23 + phase * 0.73);
-  return (octave1 + octave2 + octave3) / 1.75;
-}
-
-float domainWarpDeltaY(float x, float y, float freq, float phase) {
-  float px = x * freq;
-  float py = y * freq;
-  float octave1 = cos(px - phase);
-  float octave2 = 0.5 * cos(py * 1.97 - px * 1.43 + phase * 1.19);
-  float octave3 = 0.25 * sin(px * 3.73 + py * 0.89 - phase * 0.91);
-  return (octave1 + octave2 + octave3) / 1.75;
-}
-
-float domainWarpX(float x, float y, float amount, float freq, float phase) {
-  return x + amount * domainWarpDeltaX(x, y, freq, phase);
-}
-
-float domainWarpY(float x, float y, float amount, float freq, float phase) {
-  return y + amount * domainWarpDeltaY(x, y, freq, phase);
-}
-
-float domainWarpValue(float x, float y, float amount, float freq, float phase) {
-  float dx = amount * domainWarpDeltaX(x, y, freq, phase);
-  float dy = amount * domainWarpDeltaY(x, y, freq, phase);
-  return sqrt(dx * dx + dy * dy);
-}
-
-float domainWarpMask(float x, float y, float amount, float freq, float phase) {
-  return smoothstep(0.0, max(abs(amount), VV_EPSILON), domainWarpValue(x, y, amount, freq, phase));
-}
-
 float foldSymmetrySelect(float x, float y, float angle, float iterations, float channel) {
   float px = x;
   float py = y;
@@ -1313,6 +1315,275 @@ float juliaOrbitTrapValue(float x, float y, float cx, float cy, float iterations
   if (channel < 6.5) return angle;
   if (channel < 7.5) return mask;
   return value;
+}
+
+float fractalOutputValue(
+  float outX,
+  float outY,
+  float minRadius,
+  float escape,
+  float iteration,
+  float distance,
+  float angle,
+  float mask,
+  float value,
+  float channel
+) {
+  if (channel < 0.5) return outX;
+  if (channel < 1.5) return outY;
+  if (channel < 2.5) return minRadius;
+  if (channel < 3.5) return escape;
+  if (channel < 4.5) return iteration;
+  if (channel < 5.5) return distance;
+  if (channel < 6.5) return angle;
+  if (channel < 7.5) return mask;
+  return value;
+}
+
+float mandelbrotValue(float x, float y, float iterations, float bailout, float channel) {
+  float zx = 0.0;
+  float zy = 0.0;
+  float minRadius = 1000000.0;
+  float escape = 0.0;
+  float escapeIteration = 0.0;
+  float count = clamp(floor(iterations + 0.5), 0.0, 128.0);
+  float bailoutRadius = max(abs(bailout), VV_EPSILON);
+  float bailoutSquared = bailoutRadius * bailoutRadius;
+
+  for (int i = 0; i < 128; i++) {
+    if (float(i) >= count || escape > 0.5) {
+      break;
+    }
+
+    float nextX = zx * zx - zy * zy + x;
+    float nextY = 2.0 * zx * zy + y;
+    zx = nextX;
+    zy = nextY;
+
+    float radiusSquared = zx * zx + zy * zy;
+    minRadius = min(minRadius, sqrt(radiusSquared));
+
+    if (radiusSquared > bailoutSquared) {
+      escapeIteration = float(i) + 1.0;
+      escape = escapeIteration / max(count, 1.0);
+    }
+  }
+
+  float distance = sqrt(zx * zx + zy * zy);
+  float angle = atan(zy, zx);
+  float mask = 1.0 - step(VV_EPSILON, escape);
+  float trap = exp(-minRadius * 3.0);
+  float value = mix(1.0 - escape, trap, mask);
+  return fractalOutputValue(zx, zy, minRadius, escape, escapeIteration, distance, angle, mask, value, channel);
+}
+
+float burningShipValue(float x, float y, float iterations, float bailout, float channel) {
+  float zx = 0.0;
+  float zy = 0.0;
+  float minRadius = 1000000.0;
+  float escape = 0.0;
+  float escapeIteration = 0.0;
+  float count = clamp(floor(iterations + 0.5), 0.0, 128.0);
+  float bailoutRadius = max(abs(bailout), VV_EPSILON);
+  float bailoutSquared = bailoutRadius * bailoutRadius;
+
+  for (int i = 0; i < 128; i++) {
+    if (float(i) >= count || escape > 0.5) {
+      break;
+    }
+
+    float ax = abs(zx);
+    float ay = abs(zy);
+    float nextX = ax * ax - ay * ay + x;
+    float nextY = 2.0 * ax * ay + y;
+    zx = nextX;
+    zy = nextY;
+
+    float radiusSquared = zx * zx + zy * zy;
+    minRadius = min(minRadius, sqrt(radiusSquared));
+
+    if (radiusSquared > bailoutSquared) {
+      escapeIteration = float(i) + 1.0;
+      escape = escapeIteration / max(count, 1.0);
+    }
+  }
+
+  float distance = sqrt(zx * zx + zy * zy);
+  float angle = atan(zy, zx);
+  float mask = 1.0 - step(VV_EPSILON, escape);
+  float trap = exp(-minRadius * 3.0);
+  float value = mix(1.0 - escape, trap, mask);
+  return fractalOutputValue(zx, zy, minRadius, escape, escapeIteration, distance, angle, mask, value, channel);
+}
+
+float newtonValue(float x, float y, float power, float relax, float iterations, float bailout, float channel) {
+  float zx = x;
+  float zy = y;
+  float minResidual = 1000000.0;
+  float escape = 0.0;
+  float iteration = 0.0;
+  float converged = 0.0;
+  float count = clamp(floor(iterations + 0.5), 0.0, 128.0);
+  float safePower = clamp(abs(power), 1.0, 12.0);
+  float safeRelax = clamp(relax, -4.0, 4.0);
+  float bailoutRadius = max(abs(bailout), 1.0);
+
+  for (int i = 0; i < 128; i++) {
+    if (float(i) >= count || converged > 0.5 || escape > 0.5) {
+      break;
+    }
+
+    float fx = complexPowX(zx, zy, safePower) - 1.0;
+    float fy = complexPowY(zx, zy, safePower);
+    float residual = sqrt(fx * fx + fy * fy);
+    minResidual = min(minResidual, residual);
+    iteration = float(i) + 1.0;
+
+    if (residual < 0.0001) {
+      converged = 1.0;
+      break;
+    }
+
+    float dx = safePower * complexPowX(zx, zy, safePower - 1.0);
+    float dy = safePower * complexPowY(zx, zy, safePower - 1.0);
+    float derivativeSafe = complexSafeMask(dx, dy);
+    if (derivativeSafe < 0.5) {
+      break;
+    }
+
+    float stepX = complexDivX(fx, fy, dx, dy);
+    float stepY = complexDivY(fx, fy, dx, dy);
+    zx -= safeRelax * stepX;
+    zy -= safeRelax * stepY;
+
+    if (zx * zx + zy * zy > bailoutRadius * bailoutRadius * 64.0) {
+      escape = iteration / max(count, 1.0);
+    }
+  }
+
+  float distance = sqrt(zx * zx + zy * zy);
+  float angle = atan(zy, zx);
+  float basin = fract(angle / VV_TAU * safePower + 1.0);
+  float value = basin * converged;
+  return fractalOutputValue(zx, zy, minResidual, escape, iteration, distance, angle, converged, value, channel);
+}
+
+float novaValue(
+  float x,
+  float y,
+  float cx,
+  float cy,
+  float power,
+  float relax,
+  float iterations,
+  float bailout,
+  float channel
+) {
+  float zx = x;
+  float zy = y;
+  float minResidual = 1000000.0;
+  float escape = 0.0;
+  float iteration = 0.0;
+  float converged = 0.0;
+  float count = clamp(floor(iterations + 0.5), 0.0, 128.0);
+  float safePower = clamp(abs(power), 1.0, 12.0);
+  float safeRelax = clamp(relax, -4.0, 4.0);
+  float bailoutRadius = max(abs(bailout), 1.0);
+
+  for (int i = 0; i < 128; i++) {
+    if (float(i) >= count || converged > 0.5 || escape > 0.5) {
+      break;
+    }
+
+    float fx = complexPowX(zx, zy, safePower) - 1.0;
+    float fy = complexPowY(zx, zy, safePower);
+    float residual = sqrt(fx * fx + fy * fy);
+    minResidual = min(minResidual, residual);
+    iteration = float(i) + 1.0;
+
+    if (residual < 0.0001) {
+      converged = 1.0;
+      break;
+    }
+
+    float dx = safePower * complexPowX(zx, zy, safePower - 1.0);
+    float dy = safePower * complexPowY(zx, zy, safePower - 1.0);
+    float derivativeSafe = complexSafeMask(dx, dy);
+    if (derivativeSafe < 0.5) {
+      break;
+    }
+
+    float stepX = complexDivX(fx, fy, dx, dy);
+    float stepY = complexDivY(fx, fy, dx, dy);
+    zx = zx - safeRelax * stepX + cx;
+    zy = zy - safeRelax * stepY + cy;
+
+    if (zx * zx + zy * zy > bailoutRadius * bailoutRadius * 64.0) {
+      escape = iteration / max(count, 1.0);
+    }
+  }
+
+  float distance = sqrt(zx * zx + zy * zy);
+  float angle = atan(zy, zx);
+  float basin = fract(angle / VV_TAU * safePower + 1.0);
+  float value = mix(exp(-minResidual * 4.0), basin, converged);
+  return fractalOutputValue(zx, zy, minResidual, escape, iteration, distance, angle, converged, value, channel);
+}
+
+float lyapunovUseB(int iteration, float sequence) {
+  float mode = mod(floor(sequence + 0.5), 4.0);
+  float index = float(iteration);
+
+  if (mode < 0.5) {
+    return mod(index, 2.0);
+  }
+
+  if (mode < 1.5) {
+    return step(1.5, mod(index, 3.0));
+  }
+
+  if (mode < 2.5) {
+    return step(0.5, mod(index, 3.0));
+  }
+
+  float abbaIndex = mod(index, 4.0);
+  return step(0.5, abbaIndex) * (1.0 - step(2.5, abbaIndex));
+}
+
+float lyapunovValue(
+  float x,
+  float y,
+  float aScale,
+  float bScale,
+  float seed,
+  float sequence,
+  float iterations,
+  float channel
+) {
+  float a = clamp(x * aScale, 0.0, 4.0);
+  float b = clamp(y * bScale, 0.0, 4.0);
+  float state = clamp(seed, VV_EPSILON, 1.0 - VV_EPSILON);
+  float sum = 0.0;
+  float minCenterDistance = 1.0;
+  float count = clamp(floor(iterations + 0.5), 1.0, 128.0);
+
+  for (int i = 0; i < 128; i++) {
+    if (float(i) >= count) {
+      break;
+    }
+
+    float r = mix(a, b, lyapunovUseB(i, sequence));
+    float derivative = abs(r * (1.0 - 2.0 * state));
+    sum += log(max(derivative, VV_EPSILON));
+    state = clamp(r * state * (1.0 - state), VV_EPSILON, 1.0 - VV_EPSILON);
+    minCenterDistance = min(minCenterDistance, abs(state - 0.5));
+  }
+
+  float exponent = sum / max(count, 1.0);
+  float chaos = step(0.0, exponent);
+  float value = 0.5 + 0.5 * tanh(exponent);
+  float angle = atan(b - 2.0, a - 2.0);
+  return fractalOutputValue(state, exponent, minCenterDistance, chaos, count, abs(exponent), angle, chaos, value, channel);
 }
 
 vec2 noiseGradient(vec2 p) {

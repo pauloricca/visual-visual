@@ -7,6 +7,8 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
     outputs: [
       { name: 'x' },
       { name: 'y' },
+      { name: 'dx' },
+      { name: 'dy' },
       { name: 'time' },
       { name: 'frame' },
       { name: 'mic' },
@@ -286,24 +288,6 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
       { name: 'mask' },
     ],
   },
-  domainWarp: {
-    type: 'domainWarp',
-    inputs: [
-      { name: 'x', defaultValue: 0 },
-      { name: 'y', defaultValue: 0 },
-      { name: 'amount', defaultValue: 0.1 },
-      { name: 'freq', defaultValue: 8 },
-      { name: 'phase', defaultValue: 0 },
-    ],
-    outputs: [
-      { name: 'outX' },
-      { name: 'outY' },
-      { name: 'value' },
-      { name: 'distance' },
-      { name: 'angle' },
-      { name: 'mask' },
-    ],
-  },
   foldSymmetry: {
     type: 'foldSymmetry',
     inputs: [
@@ -342,6 +326,65 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
       { name: 'angle' },
       { name: 'mask' },
     ],
+  },
+  mandelbrot: {
+    type: 'mandelbrot',
+    inputs: [
+      { name: 'x', defaultValue: 0 },
+      { name: 'y', defaultValue: 0 },
+      { name: 'iterations', defaultValue: 64, min: 0, max: 128, integer: true },
+      { name: 'bailout', defaultValue: 4 },
+    ],
+    outputs: fractalOutputs(),
+  },
+  burningShip: {
+    type: 'burningShip',
+    inputs: [
+      { name: 'x', defaultValue: 0 },
+      { name: 'y', defaultValue: 0 },
+      { name: 'iterations', defaultValue: 64, min: 0, max: 128, integer: true },
+      { name: 'bailout', defaultValue: 4 },
+    ],
+    outputs: fractalOutputs(),
+  },
+  nova: {
+    type: 'nova',
+    inputs: [
+      { name: 'x', defaultValue: 0 },
+      { name: 'y', defaultValue: 0 },
+      { name: 'cx', defaultValue: -0.5 },
+      { name: 'cy', defaultValue: 0 },
+      { name: 'power', defaultValue: 3 },
+      { name: 'relax', defaultValue: 1 },
+      { name: 'iterations', defaultValue: 48, min: 0, max: 128, integer: true },
+      { name: 'bailout', defaultValue: 4 },
+    ],
+    outputs: fractalOutputs(),
+  },
+  newton: {
+    type: 'newton',
+    inputs: [
+      { name: 'x', defaultValue: 0 },
+      { name: 'y', defaultValue: 0 },
+      { name: 'power', defaultValue: 3 },
+      { name: 'relax', defaultValue: 1 },
+      { name: 'iterations', defaultValue: 32, min: 0, max: 128, integer: true },
+      { name: 'bailout', defaultValue: 4 },
+    ],
+    outputs: fractalOutputs(),
+  },
+  lyapunov: {
+    type: 'lyapunov',
+    inputs: [
+      { name: 'x', defaultValue: 0 },
+      { name: 'y', defaultValue: 0 },
+      { name: 'aScale', defaultValue: 4 },
+      { name: 'bScale', defaultValue: 4 },
+      { name: 'seed', defaultValue: 0.5 },
+      { name: 'sequence', defaultValue: 0, min: 0, max: 3, integer: true },
+      { name: 'iterations', defaultValue: 64, min: 1, max: 128, integer: true },
+    ],
+    outputs: fractalOutputs(),
   },
   Quantise: {
     type: 'Quantise',
@@ -596,4 +639,18 @@ function oscillator(type: NodeType): NodeDefinition {
     ],
     outputs: [{ name: 'value' }],
   };
+}
+
+function fractalOutputs(): NodeDefinition['outputs'] {
+  return [
+    { name: 'outX' },
+    { name: 'outY' },
+    { name: 'value' },
+    { name: 'minRadius' },
+    { name: 'escape' },
+    { name: 'iteration' },
+    { name: 'distance' },
+    { name: 'angle' },
+    { name: 'mask' },
+  ];
 }

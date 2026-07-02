@@ -1487,10 +1487,14 @@ function NodeEditorInner() {
     [edgesWithCallbacks, editingStack, nodesWithCallbacks, patchName],
   );
   const temporaryReconnectEdge = useMemo(
-    () => temporaryReconnectEdgeFromHover(reconnectPreviewSourceRef.current, reconnectHover),
+    () => temporaryConnectionEdgeFromHover(reconnectHover, reconnectPreviewSourceRef.current),
     [reconnectHover],
   );
-  const compileEdgesWithPreview = useMemo(
+  const temporaryNewConnectionEdge = useMemo(
+    () => reconnectPreviewSourceRef.current ? null : temporaryConnectionEdgeFromHover(reconnectHover),
+    [reconnectHover],
+  );
+  const compileEdgesWithReconnectPreview = useMemo(
     () => applyTemporaryReconnectEdge(
       edgesWithCallbacks,
       temporaryReconnectEdge,
@@ -1498,6 +1502,12 @@ function NodeEditorInner() {
       reconnectDuplicateActive,
     ),
     [edgesWithCallbacks, reconnectDuplicateActive, temporaryReconnectEdge],
+  );
+  const compileEdgesWithPreview = useMemo(
+    () => temporaryNewConnectionEdge
+      ? dedupeEdges([...compileEdgesWithReconnectPreview, temporaryNewConnectionEdge])
+      : compileEdgesWithReconnectPreview,
+    [compileEdgesWithReconnectPreview, temporaryNewConnectionEdge],
   );
   const materializedCompileGraph = useMemo(
     () => materializeRootGraph(nodesWithCallbacks, compileEdgesWithPreview, editingStack, patchName),
@@ -3184,23 +3194,39 @@ function parseReconnectHoverKey(key: string | null): ReconnectHoverState | null 
   };
 }
 
-function temporaryReconnectEdgeFromHover(
-  sourceEdge: ShaderFlowEdge | null,
+function temporaryConnectionEdgeFromHover(
   hover: ReconnectHoverState | null,
+  sourceEdge?: ShaderFlowEdge | null,
 ): ShaderFlowEdge | null {
-  if (!sourceEdge || !hover) return null;
+  if (!hover) return null;
 
   const { fromHandle, toHandle } = hover;
+  const baseCandidate: ShaderFlowEdge = {
+    id: 'temporary-connection-hover',
+    type: 'shaderEdge',
+    source: '',
+    sourceHandle: null,
+    target: '',
+    targetHandle: null,
+    data: {
+      weight: sourceEdge?.data?.weight ?? 1,
+      mode: sourceEdge?.data?.mode ?? 'set',
+      onWeightChange: updateEdgeWeightPlaceholder,
+      onModeChange: updateEdgeModePlaceholder,
+      onInsertNode: updateEdgeInsertPlaceholder,
+    },
+    className: 'shader-edge',
+  };
   const candidate = fromHandle.type === 'source'
     ? {
-        ...sourceEdge,
+        ...baseCandidate,
         source: fromHandle.nodeId,
         sourceHandle: fromHandle.id,
         target: toHandle.nodeId,
         targetHandle: toHandle.id,
       }
     : {
-        ...sourceEdge,
+        ...baseCandidate,
         source: toHandle.nodeId,
         sourceHandle: toHandle.id,
         target: fromHandle.nodeId,
@@ -3212,8 +3238,8 @@ function temporaryReconnectEdgeFromHover(
   return edgeFromLink({
     from: link.from,
     to: link.to,
-    weight: sourceEdge.data?.weight ?? link.weight ?? 1,
-    mode: sourceEdge.data?.mode ?? link.mode ?? 'set',
+    weight: sourceEdge?.data?.weight ?? link.weight ?? 1,
+    mode: sourceEdge?.data?.mode ?? link.mode ?? 'set',
   });
 }
 
