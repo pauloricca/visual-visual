@@ -6,11 +6,20 @@ export default defineConfig({
   plugins: [react(), renderSyncPlugin()],
   server: {
     https: viteHttpsConfig(),
+    headers: crossOriginIsolationHeaders(),
   },
   preview: {
     https: viteHttpsConfig(),
+    headers: crossOriginIsolationHeaders(),
   },
 });
+
+function crossOriginIsolationHeaders() {
+  return {
+    'Cross-Origin-Opener-Policy': 'same-origin',
+    'Cross-Origin-Embedder-Policy': 'require-corp',
+  };
+}
 
 function viteHttpsConfig() {
   const keyPath = process.env.VISUAL_VISUAL_HTTPS_KEY;

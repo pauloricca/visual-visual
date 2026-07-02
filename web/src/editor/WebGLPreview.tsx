@@ -84,8 +84,10 @@ interface StateResources {
 interface MediaResources {
   micStream: MediaStream | null;
   audioContext: AudioContext | null;
-  analyser: AnalyserNode | null;
-  micSamples: Uint8Array<ArrayBuffer> | null;
+  micSource: MediaStreamAudioSourceNode | null;
+  micWorklet: AudioWorkletNode | null;
+  micMetrics: Float32Array<ArrayBuffer>;
+  sharedMicMetrics: Int32Array<SharedArrayBuffer> | null;
   cameraStream: MediaStream | null;
   cameraVideo: HTMLVideoElement | null;
   cameraTexture: WebGLTexture | null;
@@ -96,10 +98,29 @@ interface MediaResources {
 
 type SetPreviewError = Dispatch<SetStateAction<string | null>>;
 
+interface MicWorkletMessage {
+  type?: string;
+  metrics?: number[];
+}
+
+type LowLatencyAudioConstraints = MediaTrackConstraints & {
+  latency?: number | {
+    ideal?: number;
+    min?: number;
+    max?: number;
+    exact?: number;
+  };
+};
+
 const MAX_DELAY_FRAMES = 32;
 const DELAY_HISTORY_LENGTH = MAX_DELAY_FRAMES + 1;
 const CAMERA_RETRY_INTERVAL_MS = 1000;
 const METER_UPDATE_INTERVAL_FRAMES = 6;
+const MIC_ANALYSIS_WORKLET_URL = '/mic-analysis-worklet.js';
+const MIC_METRIC_COUNT = 4;
+const MIC_LEVEL_INDEX = 0;
+const MIC_METRIC_SCALE = 1000000;
+
 export const WebGLPreview = forwardRef<WebGLPreviewHandle, Props>(function WebGLPreview({
   active = true,
   fragmentShader,
@@ -135,8 +156,10 @@ export const WebGLPreview = forwardRef<WebGLPreviewHandle, Props>(function WebGL
   const mediaResourcesRef = useRef<MediaResources>({
     micStream: null,
     audioContext: null,
-    analyser: null,
-    micSamples: null,
+    micSource: null,
+    micWorklet: null,
+    micMetrics: new Float32Array(MIC_METRIC_COUNT),
+    sharedMicMetrics: null,
     cameraStream: null,
     cameraVideo: null,
     cameraTexture: null,
@@ -747,18 +770,10 @@ function setMediaUniforms(
 }
 
 function readMicLevel(mediaResources: MediaResources): number {
-  const analyser = mediaResources.analyser;
-  const samples = mediaResources.micSamples;
-  if (!analyser || !samples) return 0;
-
-  analyser.getByteTimeDomainData(samples);
-  let total = 0;
-  for (const sample of samples) {
-    const centered = (sample - 128) / 128;
-    total += centered * centered;
+  if (mediaResources.sharedMicMetrics) {
+    return readSharedMicMetric(mediaResources.sharedMicMetrics, MIC_LEVEL_INDEX);
   }
-
-  return Math.min(Math.sqrt(total / samples.length) * 2.0, 1);
+  return clampMicMetric(mediaResources.micMetrics[MIC_LEVEL_INDEX] ?? 0);
 }
 
 function delayFrameCount(slot: ShaderDelaySlot, shaderArgs: ShaderArg[]): number {
@@ -941,22 +956,62 @@ async function startMic(
   if (mediaResources.micStream) return;
 
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    const audioConstraints: LowLatencyAudioConstraints = {
+      echoCancellation: false,
+      noiseSuppression: false,
+      autoGainControl: false,
+      channelCount: { ideal: 1 },
+      latency: { ideal: 0.01 },
+    };
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: audioConstraints,
+      video: false,
+    });
+    mediaResources.micStream = stream;
+
     const AudioContextConstructor = window.AudioContext ||
       (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
     if (!AudioContextConstructor) {
       throw new Error('Web Audio is unavailable.');
     }
-    const audioContext = new AudioContextConstructor();
-    const analyser = audioContext.createAnalyser();
-    analyser.fftSize = 256;
-    analyser.smoothingTimeConstant = 0.72;
-    audioContext.createMediaStreamSource(stream).connect(analyser);
-
-    mediaResources.micStream = stream;
+    const audioContext = new AudioContextConstructor({ latencyHint: 'interactive' });
     mediaResources.audioContext = audioContext;
-    mediaResources.analyser = analyser;
-    mediaResources.micSamples = new Uint8Array(new ArrayBuffer(analyser.fftSize));
+
+    if (!audioContext.audioWorklet) {
+      throw new Error('AudioWorklet is unavailable.');
+    }
+
+    const sharedMicMetrics = createSharedMicMetrics();
+    await audioContext.audioWorklet.addModule(MIC_ANALYSIS_WORKLET_URL);
+    if (audioContext.state === 'suspended') {
+      await audioContext.resume();
+    }
+
+    const micSource = audioContext.createMediaStreamSource(stream);
+    const micWorklet = new AudioWorkletNode(audioContext, 'mic-analysis-processor', {
+      numberOfInputs: 1,
+      numberOfOutputs: 0,
+      channelCount: 1,
+      channelCountMode: 'explicit',
+      processorOptions: {
+        sharedMetricsBuffer: sharedMicMetrics?.buffer ?? null,
+        metricCount: MIC_METRIC_COUNT,
+        metricScale: MIC_METRIC_SCALE,
+      },
+    });
+    mediaResources.micSource = micSource;
+    mediaResources.micWorklet = micWorklet;
+    mediaResources.sharedMicMetrics = sharedMicMetrics;
+
+    micWorklet.port.onmessage = (event: MessageEvent<MicWorkletMessage>) => {
+      if (event.data?.type !== 'metrics' || !Array.isArray(event.data.metrics)) return;
+      for (let index = 0; index < MIC_METRIC_COUNT; index += 1) {
+        mediaResources.micMetrics[index] = clampMicMetric(event.data.metrics[index] ?? 0);
+      }
+    };
+    micSource.connect(micWorklet);
+
+    mediaResources.micMetrics.fill(0);
     setError(null);
   } catch (caught) {
     stopMic(mediaResources);
@@ -965,12 +1020,42 @@ async function startMic(
 }
 
 function stopMic(mediaResources: MediaResources): void {
+  try {
+    mediaResources.micSource?.disconnect();
+  } catch {
+    // The node may already be disconnected during teardown.
+  }
+  try {
+    mediaResources.micWorklet?.disconnect();
+  } catch {
+    // The node may already be disconnected during teardown.
+  }
+  if (mediaResources.micWorklet) {
+    mediaResources.micWorklet.port.onmessage = null;
+    mediaResources.micWorklet.port.close();
+  }
   mediaResources.micStream?.getTracks().forEach((track) => track.stop());
   void mediaResources.audioContext?.close();
   mediaResources.micStream = null;
   mediaResources.audioContext = null;
-  mediaResources.analyser = null;
-  mediaResources.micSamples = null;
+  mediaResources.micSource = null;
+  mediaResources.micWorklet = null;
+  mediaResources.sharedMicMetrics = null;
+  mediaResources.micMetrics.fill(0);
+}
+
+function createSharedMicMetrics(): Int32Array<SharedArrayBuffer> | null {
+  if (!window.crossOriginIsolated || typeof SharedArrayBuffer === 'undefined') return null;
+  return new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT * MIC_METRIC_COUNT));
+}
+
+function readSharedMicMetric(metrics: Int32Array<SharedArrayBuffer>, index: number): number {
+  return clampMicMetric(Atomics.load(metrics, index) / MIC_METRIC_SCALE);
+}
+
+function clampMicMetric(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.min(Math.max(value, 0), 1);
 }
 
 async function ensureCamera(
