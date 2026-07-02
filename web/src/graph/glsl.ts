@@ -11,6 +11,7 @@ export interface CompileResult {
   errors: string[];
   warnings: string[];
   feedbackLinkIds: string[];
+  delayFrameLinkIds: string[];
   feedbackTextureCount: number;
   bufferSlots: ShaderBufferSlot[];
   delaySlots: ShaderDelaySlot[];
@@ -30,7 +31,10 @@ export interface ShaderArg {
 export interface ShaderDelaySlot {
   nodeId: string;
   samplerName: string;
-  frameArgName: string;
+  frameArgName?: string;
+  frameControlTextureIndex?: number;
+  frameControlChannelIndex?: number;
+  defaultFrames: number;
 }
 
 export interface ShaderBufferSlot {
@@ -78,6 +82,7 @@ export function compilePatchToGlsl(
       errors: validation.errors,
       warnings: validation.warnings,
       feedbackLinkIds: [],
+      delayFrameLinkIds: [],
       feedbackTextureCount: 0,
       bufferSlots: [],
       delaySlots: [],
@@ -99,9 +104,10 @@ export function compilePatchToGlsl(
   }));
   const feedbackByLink = new Map(feedbackSlots.map((slot) => [slot.linkId, slot]));
   const feedbackTextureCount = Math.ceil(feedbackSlots.length / 4);
+  const delayFrameLinkIds = collectDelayFrameLinkIds(expandedPatch);
   let delaySlots: ShaderDelaySlot[] = [];
   try {
-    delaySlots = collectDelaySlots(expandedPatch, shaderArgs);
+    delaySlots = collectDelaySlots(expandedPatch, shaderArgs, incoming);
   } catch (error) {
     return {
       ok: false,
@@ -110,6 +116,7 @@ export function compilePatchToGlsl(
       errors: [error instanceof Error ? error.message : String(error)],
       warnings: validation.warnings,
       feedbackLinkIds: feedbackSlots.map((slot) => slot.linkId),
+      delayFrameLinkIds,
       feedbackTextureCount,
       bufferSlots: [],
       delaySlots: [],
@@ -135,6 +142,7 @@ export function compilePatchToGlsl(
       errors: ['Patch needs one Output node.'],
       warnings: validation.warnings,
       feedbackLinkIds: feedbackSlots.map((slot) => slot.linkId),
+      delayFrameLinkIds,
       feedbackTextureCount,
       bufferSlots,
       delaySlots,
@@ -200,6 +208,17 @@ export function compilePatchToGlsl(
       }
       return resolveInput(node, 'value', context);
     });
+    const delayFrameControlExpressions = delaySlots
+      .filter((slot) => slot.frameControlTextureIndex !== undefined && slot.frameControlChannelIndex !== undefined)
+      .reduce<string[]>((expressions, slot) => {
+        const node = nodes.get(slot.nodeId);
+        if (!node) {
+          throw new Error(`Delay node "${slot.nodeId}" does not exist.`);
+        }
+        const expressionIndex = (slot.frameControlTextureIndex ?? 0) * 4 + (slot.frameControlChannelIndex ?? 0);
+        expressions[expressionIndex] = resolveInput(node, 'frames', context);
+        return expressions;
+      }, []);
 
     return {
       ok: true,
@@ -224,12 +243,14 @@ export function compilePatchToGlsl(
         scopeExpressions,
         meterSlots,
         meterExpressions,
+        delayFrameControlExpressions,
         context.media,
       ),
       shaderArgs: context.shaderArgs,
       errors: [],
       warnings: validation.warnings,
       feedbackLinkIds: feedbackSlots.map((slot) => slot.linkId),
+      delayFrameLinkIds,
       feedbackTextureCount,
       bufferSlots,
       delaySlots,
@@ -246,6 +267,7 @@ export function compilePatchToGlsl(
       errors: [error instanceof Error ? error.message : String(error)],
       warnings: validation.warnings,
       feedbackLinkIds: feedbackSlots.map((slot) => slot.linkId),
+      delayFrameLinkIds,
       feedbackTextureCount,
       bufferSlots,
       delaySlots,
@@ -720,9 +742,10 @@ function emitLogPolar(node: PatchNode, port: string, context: CompileContext): s
 function emitFoldSymmetry(node: PatchNode, port: string, context: CompileContext): string {
   const x = input(node, 'x', context);
   const y = input(node, 'y', context);
+  const startAngle = input(node, 'startAngle', context);
   const angle = input(node, 'angle', context);
   const iterations = input(node, 'iterations', context);
-  const args = `${x}, ${y}, ${angle}, ${iterations}`;
+  const args = `${x}, ${y}, ${startAngle}, ${angle}, ${iterations}`;
   const outX = `foldSymmetryX(${args})`;
   const outY = `foldSymmetryY(${args})`;
 
@@ -947,10 +970,13 @@ function buildShader(
   scopeExpressions: string[],
   meterSlots: ShaderMeterSlot[],
   meterExpressions: string[],
+  delayFrameControlExpressions: string[],
   media: ShaderMediaRequirements,
 ): string {
   const hasFeedback = feedbackTextureCount > 0;
-  const hasStateOutputs = hasFeedback || delaySlots.length > 0 || bufferSlots.length > 0 || envelopeSlots.length > 0 || scopeSlots.length > 0 || meterSlots.length > 0;
+  const delayFrameControlTextureCount = Math.ceil(delayFrameControlExpressions.length / 4);
+  const hasDelayFrameControls = delayFrameControlTextureCount > 0;
+  const hasStateOutputs = hasFeedback || delaySlots.length > 0 || bufferSlots.length > 0 || envelopeSlots.length > 0 || scopeSlots.length > 0 || meterSlots.length > 0 || hasDelayFrameControls;
   const fragmentOutput = hasStateOutputs ? 'layout(location = 0) out vec4 fragColor;' : 'out vec4 fragColor;';
   const feedbackOutputs = Array.from({ length: feedbackTextureCount }, (_, index) =>
     `layout(location = ${index + 1}) out vec4 feedbackColor${index};`,
@@ -974,6 +1000,10 @@ function buildShader(
   const meterOutputs = meterSlots.map((slot, index) =>
     `layout(location = ${meterOutputOffset + index}) out float meterValue${index};`,
   ).join('\n');
+  const delayFrameControlOutputOffset = meterOutputOffset + meterSlots.length;
+  const delayFrameControlOutputs = Array.from({ length: delayFrameControlTextureCount }, (_, index) =>
+    `layout(location = ${delayFrameControlOutputOffset + index}) out vec4 delayFrameControlColor${index};`,
+  ).join('\n');
   const header =
     target === 'webgl2'
       ? `#version 300 es
@@ -985,7 +1015,8 @@ ${delayOutputs}
 ${bufferOutputs}
 ${envelopeOutputs}
 ${scopeOutputs}
-${meterOutputs}`
+${meterOutputs}
+${delayFrameControlOutputs}`
       : `#version 330 core
 ${fragmentOutput}
 ${feedbackOutputs}
@@ -994,6 +1025,7 @@ ${bufferOutputs}
 ${envelopeOutputs}
 ${scopeOutputs}
 ${meterOutputs}
+${delayFrameControlOutputs}
 `;
   const feedbackUniforms = Array.from({ length: feedbackTextureCount }, (_, index) =>
     `uniform sampler2D u_feedback${index};`,
@@ -1043,6 +1075,13 @@ ${shaderArgUniforms}`
   scopeColor${index} = scopePixel(${scopeExpressions[index] ?? '0.0'}, uv);`).join('\n\n');
   const meterAssignments = meterSlots.map((slot, index) => `  // meter ${formatCommentText(slot.nodeId)}
   meterValue${index} = ${meterExpressions[index] ?? '0.0'};`).join('\n\n');
+  const delayFrameControlAssignments = Array.from({ length: delayFrameControlTextureCount }, (_, textureIndex) => {
+    const values = Array.from({ length: 4 }, (_, channelIndex) =>
+      delayFrameControlExpressions[textureIndex * 4 + channelIndex] ?? '0.0',
+    );
+    return `  // dynamic delay frame controls
+  delayFrameControlColor${textureIndex} = vec4(${values.join(', ')});`;
+  }).join('\n\n');
 
   return `${header}
 uniform vec2 u_resolution;
@@ -1222,7 +1261,7 @@ float logPolarMask(float x, float y, float radialScale, float angleScale) {
   return max(gridLineMask(lx, 0.035), gridLineMask(ly, 0.035));
 }
 
-float foldSymmetrySelect(float x, float y, float angle, float iterations, float channel) {
+float foldSymmetrySelect(float x, float y, float startAngle, float angle, float iterations, float channel) {
   float px = x;
   float py = y;
   float count = clamp(floor(iterations + 0.5), 0.0, 32.0);
@@ -1233,7 +1272,7 @@ float foldSymmetrySelect(float x, float y, float angle, float iterations, float 
       break;
     }
 
-    float axisAngle = angle * (float(i) + 1.0);
+    float axisAngle = startAngle + angle * float(i);
     float c = cos(axisAngle);
     float s = sin(axisAngle);
     float along = px * c + py * s;
@@ -1255,20 +1294,20 @@ float foldSymmetrySelect(float x, float y, float angle, float iterations, float 
   return mask;
 }
 
-float foldSymmetryX(float x, float y, float angle, float iterations) {
-  return foldSymmetrySelect(x, y, angle, iterations, 0.0);
+float foldSymmetryX(float x, float y, float startAngle, float angle, float iterations) {
+  return foldSymmetrySelect(x, y, startAngle, angle, iterations, 0.0);
 }
 
-float foldSymmetryY(float x, float y, float angle, float iterations) {
-  return foldSymmetrySelect(x, y, angle, iterations, 1.0);
+float foldSymmetryY(float x, float y, float startAngle, float angle, float iterations) {
+  return foldSymmetrySelect(x, y, startAngle, angle, iterations, 1.0);
 }
 
-float foldSymmetryValue(float x, float y, float angle, float iterations) {
-  return foldSymmetrySelect(x, y, angle, iterations, 2.0);
+float foldSymmetryValue(float x, float y, float startAngle, float angle, float iterations) {
+  return foldSymmetrySelect(x, y, startAngle, angle, iterations, 2.0);
 }
 
-float foldSymmetryMask(float x, float y, float angle, float iterations) {
-  return foldSymmetrySelect(x, y, angle, iterations, 3.0);
+float foldSymmetryMask(float x, float y, float startAngle, float angle, float iterations) {
+  return foldSymmetrySelect(x, y, startAngle, angle, iterations, 3.0);
 }
 
 float juliaOrbitTrapValue(float x, float y, float cx, float cy, float iterations, float bailout, float channel) {
@@ -1752,6 +1791,7 @@ ${bufferAssignments ? `\n${bufferAssignments}` : ''}
 ${envelopeAssignments ? `\n${envelopeAssignments}` : ''}
 ${scopeAssignments ? `\n${scopeAssignments}` : ''}
 ${meterAssignments ? `\n${meterAssignments}` : ''}
+${delayFrameControlAssignments ? `\n${delayFrameControlAssignments}` : ''}
 }
 `;
 }
@@ -1801,10 +1841,30 @@ function collectShaderArgs(patch: Patch, incoming: Map<string, PatchLink[]>): Sh
   return args;
 }
 
-function collectDelaySlots(patch: Patch, shaderArgs: ShaderArg[]): ShaderDelaySlot[] {
+function collectDelaySlots(
+  patch: Patch,
+  shaderArgs: ShaderArg[],
+  incoming: Map<string, PatchLink[]>,
+): ShaderDelaySlot[] {
+  let frameControlIndex = 0;
+
   return patch.nodes
     .filter((node) => node.type === 'Delay')
     .map((node) => {
+      const defaultFrames = node.params.frames ?? 1;
+      const frameLinks = incoming.get(`${node.id}.frames`) ?? [];
+      if (frameLinks.length > 0) {
+        const controlIndex = frameControlIndex;
+        frameControlIndex += 1;
+        return {
+          nodeId: node.id,
+          samplerName: `u_delay_${toGlslIdentifier(node.id)}`,
+          frameControlTextureIndex: Math.floor(controlIndex / 4),
+          frameControlChannelIndex: controlIndex % 4,
+          defaultFrames,
+        };
+      }
+
       const frameArg = shaderArgs.find((arg) => arg.nodeId === node.id && arg.port === 'frames');
       if (!frameArg) {
         throw new Error(`Delay node "${node.id}" needs an unlinked scalar "frames" input.`);
@@ -1814,8 +1874,15 @@ function collectDelaySlots(patch: Patch, shaderArgs: ShaderArg[]): ShaderDelaySl
         nodeId: node.id,
         samplerName: `u_delay_${toGlslIdentifier(node.id)}`,
         frameArgName: frameArg.name,
+        defaultFrames,
       };
     });
+}
+
+function collectDelayFrameLinkIds(patch: Patch): string[] {
+  return patch.links
+    .filter((link) => link.to.port === 'frames' && patch.nodes.some((node) => node.id === link.to.node && node.type === 'Delay'))
+    .map((link) => linkKey(link));
 }
 
 function collectBufferSlots(patch: Patch): ShaderBufferSlot[] {

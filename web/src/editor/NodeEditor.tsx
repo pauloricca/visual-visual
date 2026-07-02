@@ -1543,16 +1543,25 @@ function NodeEditorInner() {
     nodes.filter((node) => node.selected).every((node) => node.data.patchNode.type !== null)
   ), [nodes]);
   const feedbackEdgeIds = useMemo(() => new Set(compileResult.feedbackLinkIds), [compileResult.feedbackLinkIds]);
+  const controlEdgeIds = useMemo(() => new Set(compileResult.delayFrameLinkIds), [compileResult.delayFrameLinkIds]);
   const displayEdges = useMemo(() => {
     return edgesWithCallbacks.map((edge) => {
       const link = linkFromEdge(edge);
-      const className = link && feedbackEdgeIds.has(edgeId(link))
-        ? 'shader-edge shader-edge-feedback'
-        : 'shader-edge';
       const isFeedback = link ? feedbackEdgeIds.has(edgeId(link)) : false;
+      const isControl = link ? controlEdgeIds.has(edgeId(link)) : false;
+      const className = [
+        'shader-edge',
+        isFeedback ? 'shader-edge-feedback' : '',
+        isControl ? 'shader-edge-control' : '',
+      ].filter(Boolean).join(' ');
       const zIndex = edge.selected ? SELECTED_EDGE_Z_INDEX : undefined;
 
-      if (edge.className === className && edge.data?.isFeedback === isFeedback && edge.zIndex === zIndex) {
+      if (
+        edge.className === className &&
+        edge.data?.isFeedback === isFeedback &&
+        edge.data?.isControl === isControl &&
+        edge.zIndex === zIndex
+      ) {
         return edge;
       }
       return {
@@ -1562,10 +1571,11 @@ function NodeEditorInner() {
         data: {
           ...edge.data,
           isFeedback,
+          isControl,
         },
       };
     });
-  }, [edgesWithCallbacks, feedbackEdgeIds]);
+  }, [controlEdgeIds, edgesWithCallbacks, feedbackEdgeIds]);
   const draftNodePreview = useMemo(() => {
     if (!draftNodeConnection?.modifierActive || !reactFlow) return null;
 

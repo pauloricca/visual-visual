@@ -36,6 +36,7 @@ export interface ShaderEdgeData extends Record<string, unknown> {
   onInsertNode: (edgeId: string) => void;
   showLinkControls?: boolean;
   isFeedback?: boolean;
+  isControl?: boolean;
 }
 
 export type ShaderFlowEdge = Edge<ShaderEdgeData, 'shaderEdge'>;

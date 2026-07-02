@@ -759,6 +759,18 @@ select:hover {
   stroke: #ffe45c !important;
 }
 
+.shader-edge-control .shader-edge-path-foreground,
+.shader-edge-control.shader-edge-path-foreground,
+.shader-edge-path-control.shader-edge-path-foreground {
+  stroke: #44c7ff;
+}
+
+.react-flow__edge.updating .react-flow__edge-path.shader-edge-path-control.shader-edge-path-foreground,
+.react-flow__edge.selectable:focus .react-flow__edge-path.shader-edge-path-control.shader-edge-path-foreground,
+.react-flow__edge.selectable:focus-visible .react-flow__edge-path.shader-edge-path-control.shader-edge-path-foreground {
+  stroke: #44c7ff !important;
+}
+
 .react-flow__edge.selected .shader-edge-path-foreground,
 .shader-edge-path-selected {
   stroke: #7cff00 !important;

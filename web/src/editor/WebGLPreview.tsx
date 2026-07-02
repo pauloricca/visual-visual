@@ -61,17 +61,21 @@ interface StateResources {
   displayTexture: WebGLTexture;
   feedbackTextures: [WebGLTexture[], WebGLTexture[]];
   delayTextures: WebGLTexture[][];
+  delayFrameControlTextures: WebGLTexture[];
   bufferTextures: [WebGLTexture[], WebGLTexture[]];
   envelopeTextures: [WebGLTexture[], WebGLTexture[]];
   scopeTextures: WebGLTexture[];
   meterTextures: WebGLTexture[];
   meterReductionTextures: Array<[WebGLTexture, WebGLTexture]>;
   meterReadback: Float32Array<ArrayBuffer>;
+  delayFrameControlReadback: Float32Array<ArrayBuffer>;
+  delayFrameCounts: number[];
   width: number;
   height: number;
   feedbackTextureCount: number;
   bufferSlotCount: number;
   delaySlotCount: number;
+  delayFrameControlTextureCount: number;
   envelopeSlotCount: number;
   scopeSlotCount: number;
   meterSlotCount: number;
@@ -259,6 +263,7 @@ export const WebGLPreview = forwardRef<WebGLPreviewHandle, Props>(function WebGL
               resources.height !== canvas.height ||
               resources.feedbackTextureCount !== program.feedbackTextureCount ||
               resources.delaySlotCount !== program.delaySlots.length ||
+              resources.delayFrameControlTextureCount !== delayFrameControlTextureCount(program.delaySlots) ||
               resources.bufferSlotCount !== program.bufferSlots.length ||
               resources.envelopeSlotCount !== program.envelopeSlots.length ||
               resources.scopeSlotCount !== program.scopeSlots.length ||
@@ -273,6 +278,7 @@ export const WebGLPreview = forwardRef<WebGLPreviewHandle, Props>(function WebGL
                 canvas.height,
                 program.feedbackTextureCount,
                 program.delaySlots.length,
+                delayFrameControlTextureCount(program.delaySlots),
                 program.bufferSlots.length,
                 program.envelopeSlots.length,
                 program.scopeSlots.length,
@@ -657,6 +663,19 @@ function renderFeedbackFrame(
     drawBuffers.push(attachment);
   }
 
+  const delayFrameControlAttachmentOffset = meterAttachmentOffset + meterSlots.length;
+  for (let index = 0; index < resources.delayFrameControlTextureCount; index += 1) {
+    const attachment = gl.COLOR_ATTACHMENT0 + delayFrameControlAttachmentOffset + index;
+    gl.framebufferTexture2D(
+      gl.FRAMEBUFFER,
+      attachment,
+      gl.TEXTURE_2D,
+      resources.delayFrameControlTextures[index],
+      0,
+    );
+    drawBuffers.push(attachment);
+  }
+
   gl.drawBuffers(drawBuffers);
 
   const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
@@ -676,7 +695,7 @@ function renderFeedbackFrame(
 
   for (let index = 0; index < delaySlots.length; index += 1) {
     const textureUnit = resources.feedbackTextureCount + index;
-    const delayFrames = delayFrameCount(delaySlots[index], shaderArgs);
+    const delayFrames = delayFrameCount(delaySlots[index], index, shaderArgs, resources);
     const readIndex = positiveModulo(resources.delayWriteIndex - delayFrames, DELAY_HISTORY_LENGTH);
     gl.activeTexture(gl.TEXTURE0 + textureUnit);
     gl.bindTexture(gl.TEXTURE_2D, resources.delayTextures[index][readIndex]);
@@ -701,6 +720,7 @@ function renderFeedbackFrame(
 
   setMediaUniforms(gl, program, mediaResources, envelopeTextureOffset + envelopeSlots.length);
   gl.drawArrays(gl.TRIANGLES, 0, 3);
+  updateDelayFrameControls(gl, resources, delaySlots, delayFrameControlAttachmentOffset);
 
   resources.feedbackReadIndex = feedbackWriteIndex;
   resources.bufferReadIndex = bufferWriteIndex;
@@ -776,11 +796,57 @@ function readMicLevel(mediaResources: MediaResources): number {
   return clampMicMetric(mediaResources.micMetrics[MIC_LEVEL_INDEX] ?? 0);
 }
 
-function delayFrameCount(slot: ShaderDelaySlot, shaderArgs: ShaderArg[]): number {
+function updateDelayFrameControls(
+  gl: WebGL2RenderingContext,
+  resources: StateResources,
+  delaySlots: ShaderDelaySlot[],
+  attachmentOffset: number,
+): void {
+  if (resources.delayFrameControlTextureCount === 0) return;
+
+  for (let textureIndex = 0; textureIndex < resources.delayFrameControlTextureCount; textureIndex += 1) {
+    gl.readBuffer(gl.COLOR_ATTACHMENT0 + attachmentOffset + textureIndex);
+    gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.FLOAT, resources.delayFrameControlReadback);
+
+    for (let slotIndex = 0; slotIndex < delaySlots.length; slotIndex += 1) {
+      const slot = delaySlots[slotIndex];
+      if (slot.frameControlTextureIndex !== textureIndex || slot.frameControlChannelIndex === undefined) continue;
+      resources.delayFrameCounts[slotIndex] = quantizeDelayFrames(
+        resources.delayFrameControlReadback[slot.frameControlChannelIndex],
+        slot.defaultFrames,
+      );
+    }
+  }
+}
+
+function delayFrameCount(
+  slot: ShaderDelaySlot,
+  slotIndex: number,
+  shaderArgs: ShaderArg[],
+  resources: StateResources,
+): number {
+  if (slot.frameControlTextureIndex !== undefined) {
+    return quantizeDelayFrames(resources.delayFrameCounts[slotIndex], slot.defaultFrames);
+  }
+
+  if (!slot.frameArgName) {
+    return quantizeDelayFrames(slot.defaultFrames, 1);
+  }
+
   const arg = shaderArgs.find((candidate) => candidate.name === slot.frameArgName);
-  const rawFrames = Math.round(arg?.value ?? 1);
+  return quantizeDelayFrames(arg?.value, slot.defaultFrames);
+}
+
+function quantizeDelayFrames(value: number | undefined, fallback: number): number {
+  const rawFrames = Math.round(value ?? fallback);
   if (!Number.isFinite(rawFrames)) return 1;
   return Math.min(Math.max(rawFrames, 1), MAX_DELAY_FRAMES);
+}
+
+function delayFrameControlTextureCount(delaySlots: ShaderDelaySlot[]): number {
+  const controlSlots = delaySlots.filter((slot) => slot.frameControlTextureIndex !== undefined);
+  if (controlSlots.length === 0) return 0;
+  return Math.max(...controlSlots.map((slot) => slot.frameControlTextureIndex ?? 0)) + 1;
 }
 
 function positiveModulo(value: number, modulus: number): number {
@@ -1203,6 +1269,7 @@ function createStateResources(
   height: number,
   feedbackTextureCount: number,
   delaySlotCount: number,
+  delayFrameControlTextureCount: number,
   bufferSlotCount: number,
   envelopeSlotCount: number,
   scopeSlotCount: number,
@@ -1215,7 +1282,7 @@ function createStateResources(
   const maxColorAttachments = gl.getParameter(gl.MAX_COLOR_ATTACHMENTS) as number;
   const maxDrawBuffers = gl.getParameter(gl.MAX_DRAW_BUFFERS) as number;
   const maxTextureUnits = gl.getParameter(gl.MAX_TEXTURE_IMAGE_UNITS) as number;
-  const stateOutputCount = feedbackTextureCount + delaySlotCount + bufferSlotCount + envelopeSlotCount + scopeSlotCount + meterSlotCount;
+  const stateOutputCount = feedbackTextureCount + delaySlotCount + bufferSlotCount + envelopeSlotCount + scopeSlotCount + meterSlotCount + delayFrameControlTextureCount;
   const sampledStateCount = feedbackTextureCount + delaySlotCount + bufferSlotCount + envelopeSlotCount;
   if (stateOutputCount + 1 > Math.min(maxColorAttachments, maxDrawBuffers)) {
     throw new Error(`This GPU can render ${Math.min(maxColorAttachments, maxDrawBuffers) - 1} state textures at once.`);
@@ -1249,6 +1316,11 @@ function createStateResources(
       history.push(createTexture(gl, width, height, gl.R32F, gl.RED, gl.FLOAT));
     }
     delayTextures.push(history);
+  }
+
+  const delayFrameControlTextures: WebGLTexture[] = [];
+  for (let index = 0; index < delayFrameControlTextureCount; index += 1) {
+    delayFrameControlTextures.push(createTexture(gl, width, height, gl.RGBA32F, gl.RGBA, gl.FLOAT));
   }
 
   const bufferTextures: [WebGLTexture[], WebGLTexture[]] = [[], []];
@@ -1286,17 +1358,21 @@ function createStateResources(
     displayTexture,
     feedbackTextures,
     delayTextures,
+    delayFrameControlTextures,
     bufferTextures,
     envelopeTextures,
     scopeTextures,
     meterTextures,
     meterReductionTextures,
     meterReadback: new Float32Array(2),
+    delayFrameControlReadback: new Float32Array(4),
+    delayFrameCounts: Array.from({ length: delaySlotCount }, () => 1),
     width,
     height,
     feedbackTextureCount,
     bufferSlotCount,
     delaySlotCount,
+    delayFrameControlTextureCount,
     envelopeSlotCount,
     scopeSlotCount,
     meterSlotCount,
@@ -1343,6 +1419,9 @@ function disposeStateResources(gl: WebGL2RenderingContext, resources: StateResou
     for (const texture of history) {
       gl.deleteTexture(texture);
     }
+  }
+  for (const texture of resources.delayFrameControlTextures) {
+    gl.deleteTexture(texture);
   }
   for (const textureSet of resources.bufferTextures) {
     for (const texture of textureSet) {

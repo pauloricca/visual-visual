@@ -293,6 +293,7 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
     inputs: [
       { name: 'x', defaultValue: 0 },
       { name: 'y', defaultValue: 0 },
+      { name: 'startAngle', defaultValue: 0 },
       { name: 'angle', defaultValue: 0.523599 },
       { name: 'iterations', defaultValue: 6, min: 0, max: 32, integer: true },
     ],
@@ -456,7 +457,7 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
     type: 'Delay',
     inputs: [
       { name: 'value', defaultValue: 0 },
-      { name: 'frames', defaultValue: 1, connectable: false, min: 1, max: 32, integer: true },
+      { name: 'frames', defaultValue: 1, min: 1, max: 32, integer: true },
     ],
     outputs: [{ name: 'value' }],
   },

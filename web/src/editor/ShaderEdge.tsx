@@ -17,6 +17,7 @@ const FEEDBACK_CURVE_OFFSET = 142;
 export function ShaderEdge(props: EdgeProps<ShaderFlowEdge>) {
   const [linkControlsVisible, setLinkControlsVisible] = useState(false);
   const isFeedback = props.data?.isFeedback === true;
+  const isControl = props.data?.isControl === true;
   const [defaultEdgePath, defaultLabelX, defaultLabelY] = getBezierPath(props);
   const [edgePath, labelX, labelY] = isFeedback
     ? getFeedbackPath(props, FEEDBACK_CURVE_OFFSET)
@@ -32,11 +33,13 @@ export function ShaderEdge(props: EdgeProps<ShaderFlowEdge>) {
     'shader-edge-path',
     'shader-edge-path-underlay',
     isFeedback ? 'shader-edge-path-feedback' : '',
+    isControl ? 'shader-edge-path-control' : '',
   ].join(' ');
   const edgeClassName = [
     'shader-edge-path',
     'shader-edge-path-foreground',
     isFeedback ? 'shader-edge-path-feedback' : '',
+    isControl ? 'shader-edge-path-control' : '',
     selected ? 'shader-edge-path-selected' : '',
   ].filter(Boolean).join(' ');
   const selectedUnderlayStyle = selected
