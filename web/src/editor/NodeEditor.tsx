@@ -27,7 +27,7 @@ import type { LinkMode, NodeDefinition, NodeType, Patch, PatchLink, PatchNode, P
 import { validatePatch } from '../graph/validate';
 import { ExportPanel } from '../export/ExportPanel';
 import { renderBundleFromCompileResult, renderBundleRevision } from '../render/renderBundle';
-import { useRenderSyncPublisher } from '../sync/renderSync';
+import { ensureRenderSyncAppIdInUrl, useRenderSyncPublisher } from '../sync/renderSync';
 import { demoPatch } from '../graph/demoPatch';
 import {
   edgeId,
@@ -53,6 +53,7 @@ const STORAGE_KEY = 'visual-visual.editor-state.v1';
 const MIDI_CC_STORAGE_KEY = 'visual-visual.midi-cc-values.v1';
 const MIDI_CC_PERSIST_DELAY_MS = 120;
 const HISTORY_LIMIT = 100;
+const SAVE_FEEDBACK_MS = 1000;
 const DRAFT_NODE_PREVIEW_ID = '__draft_node_preview__';
 const DUPLICATE_NODE_PREVIEW_PREFIX = '__duplicate_node_preview__:';
 const PASTE_OFFSET = { x: 36, y: 36 };
@@ -63,6 +64,10 @@ const DEFAULT_EXPRESSION = 'a';
 const SELECTED_EDGE_Z_INDEX = 10000;
 const MAX_FLOW_OFFSCREEN_RATIO = 0.5;
 const DEFAULT_NODE_BOUNDS = { width: 240, height: 96 };
+const DEFAULT_FIT_VIEW_PADDING = 0.2;
+const NEW_PATCH_FIT_VIEW_PADDING = 0.55;
+const EMPTY_PATCH_SYSTEM_POSITION = { x: 0, y: 160 };
+const EMPTY_PATCH_OUTPUT_POSITION = { x: 960, y: 160 };
 const FLOW_INFINITE_EXTENT: CoordinateExtent = [[Number.NEGATIVE_INFINITY, Number.NEGATIVE_INFINITY], [Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY]];
 let subpatchCloneSequence = 0;
 
@@ -86,6 +91,25 @@ interface SubpatchImportModalState {
   fileName: string;
   candidates: ImportedSubpatchCandidate[];
   selectedKey: string | null;
+  error: string | null;
+}
+
+interface LocalPatchVersion {
+  id: string;
+  savedAt: string;
+}
+
+interface LocalPatchEntry {
+  name: string;
+  versionCount: number;
+  versions: LocalPatchVersion[];
+}
+
+interface LocalPatchLibraryState {
+  patches: LocalPatchEntry[];
+  selectedPatchName: string | null;
+  selectedVersionId: string | null;
+  loading: boolean;
   error: string | null;
 }
 
@@ -159,6 +183,7 @@ export function NodeEditor() {
 
 function NodeEditorInner() {
   const [editingTypeNodeId, setEditingTypeNodeId] = useState<string | null>(null);
+  const renderSyncAppId = useMemo(() => ensureRenderSyncAppIdInUrl(), []);
   const initialState = useMemo(() => loadInitialEditorState(), []);
   const [sidePanelOpen, setSidePanelOpen] = useState(initialState?.ui?.sidePanelOpen ?? true);
   const [patchName, setPatchName] = useState(initialState?.ui?.patchName ?? 'untitled-patch');
@@ -170,6 +195,7 @@ function NodeEditorInner() {
   const [viewportForBounds, setViewportForBounds] = useState<Viewport>(initialState?.ui?.viewport ?? { x: 0, y: 0, zoom: 1 });
   const [editorSize, setEditorSize] = useState<EditorSize>({ width: 0, height: 0 });
   const [subpatchImportModal, setSubpatchImportModal] = useState<SubpatchImportModalState | null>(null);
+  const [localPatchLibrary, setLocalPatchLibrary] = useState<LocalPatchLibraryState | null>(null);
   const [fps, setFps] = useState(0);
   const [reactFlow, setReactFlow] = useState<ReactFlowInstance<ShaderFlowNode, ShaderFlowEdge> | null>(null);
   const [edgeOverlayElement, setEdgeOverlayElement] = useState<HTMLElement | null>(null);
@@ -217,10 +243,13 @@ function NodeEditorInner() {
   const historyGroupRef = useRef<{ key: string; time: number } | null>(null);
   const nodeDragHistoryRef = useRef(false);
   const edgeSelectionTimeoutRef = useRef<number | null>(null);
+  const saveFeedbackTimeoutRef = useRef<number | null>(null);
   const [history, setHistory] = useState<HistoryState>({
     past: [],
     future: [],
   });
+  const [saveFeedbackActive, setSaveFeedbackActive] = useState(false);
+  const localPatchStorageEnabled = useMemo(() => canUseLocalPatchStorage(), []);
   const [editingStack, setEditingStack] = useState<SubpatchEditFrame[]>([]);
   const [draftNodeConnection, setDraftNodeConnection] = useState<DraftNodeConnection | null>(null);
   const [pendingBoundaryPort, setPendingBoundaryPort] = useState<BoundaryPortSelection | null>(null);
@@ -247,6 +276,7 @@ function NodeEditorInner() {
   const importFileInputRef = useRef<HTMLInputElement | null>(null);
   const editorShellRef = useRef<HTMLElement | null>(null);
   const previewRef = useRef<WebGLPreviewHandle | null>(null);
+  const selectedLocalPatchOptionRef = useRef<HTMLButtonElement | null>(null);
   const midiCcValuesRef = useRef<MidiCcValueMap>(loadMidiCcValues());
   const midiCcPersistTimeoutRef = useRef<number | null>(null);
 
@@ -306,6 +336,21 @@ function NodeEditorInner() {
     if (edgeSelectionTimeoutRef.current !== null) {
       window.clearTimeout(edgeSelectionTimeoutRef.current);
     }
+    if (saveFeedbackTimeoutRef.current !== null) {
+      window.clearTimeout(saveFeedbackTimeoutRef.current);
+    }
+  }, []);
+
+  const showSaveFeedback = useCallback(() => {
+    if (saveFeedbackTimeoutRef.current !== null) {
+      window.clearTimeout(saveFeedbackTimeoutRef.current);
+    }
+
+    setSaveFeedbackActive(true);
+    saveFeedbackTimeoutRef.current = window.setTimeout(() => {
+      saveFeedbackTimeoutRef.current = null;
+      setSaveFeedbackActive(false);
+    }, SAVE_FEEDBACK_MS);
   }, []);
 
   const commitHistory = useCallback((groupKey?: string) => {
@@ -1537,7 +1582,7 @@ function NodeEditorInner() {
     () => renderBundleFromCompileResult(projectorCompileResult, rootPatchName, projectorRevision),
     [projectorCompileResult, projectorRevision, rootPatchName],
   );
-  useRenderSyncPublisher(projectorBundle);
+  useRenderSyncPublisher(projectorBundle, renderSyncAppId);
   const canGroupSelection = useMemo(() => (
     nodes.some((node) => node.selected) &&
     nodes.filter((node) => node.selected).every((node) => node.data.patchNode.type !== null)
@@ -2214,11 +2259,11 @@ function NodeEditorInner() {
     void document.documentElement.requestFullscreen();
   }, []);
 
-  const fitGraphToView = useCallback(() => {
+  const fitGraphToView = useCallback((padding = DEFAULT_FIT_VIEW_PADDING) => {
     if (!reactFlow) return;
 
     window.setTimeout(() => {
-      void reactFlow.fitView({ padding: 0.2 }).then(() => {
+      void reactFlow.fitView({ padding }).then(() => {
         const nextViewport = reactFlow.getViewport();
         setViewportForBounds(nextViewport);
         setViewport(nextViewport);
@@ -2311,7 +2356,85 @@ function NodeEditorInner() {
     updateNodeType,
   ]);
 
-  const savePatchJson = useCallback(() => {
+  const openLocalPatchLibrary = useCallback(async () => {
+    setLocalPatchLibrary({
+      patches: [],
+      selectedPatchName: null,
+      selectedVersionId: null,
+      loading: true,
+      error: null,
+    });
+
+    try {
+      const patches = await fetchLocalPatchLibrary();
+      const selectedPatch = selectInitialLocalPatch(patches, rootPatchName);
+      setLocalPatchLibrary({
+        patches,
+        selectedPatchName: selectedPatch?.name ?? null,
+        selectedVersionId: selectedPatch?.versions[0]?.id ?? null,
+        loading: false,
+        error: patches.length === 0 ? 'No saved patches found in patches/.' : null,
+      });
+      setImportError(null);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setLocalPatchLibrary({
+        patches: [],
+        selectedPatchName: null,
+        selectedVersionId: null,
+        loading: false,
+        error: message,
+      });
+      setImportError(message);
+    }
+  }, [rootPatchName]);
+
+  const closeLocalPatchLibrary = useCallback(() => {
+    setLocalPatchLibrary(null);
+  }, []);
+
+  const selectLocalPatch = useCallback((patchEntry: LocalPatchEntry) => {
+    setLocalPatchLibrary((current) => current ? {
+      ...current,
+      selectedPatchName: patchEntry.name,
+      selectedVersionId: patchEntry.versions[0]?.id ?? null,
+    } : current);
+  }, []);
+
+  const selectLocalPatchVersion = useCallback((version: LocalPatchVersion) => {
+    setLocalPatchLibrary((current) => current ? {
+      ...current,
+      selectedVersionId: version.id,
+    } : current);
+  }, []);
+
+  const loadSelectedLocalPatch = useCallback(async () => {
+    const selectedPatchName = localPatchLibrary?.selectedPatchName;
+    const selectedVersionId = localPatchLibrary?.selectedVersionId;
+    if (!selectedPatchName || !selectedVersionId) return;
+
+    try {
+      loadPatchJson(await fetchLocalPatchVersion(selectedPatchName, selectedVersionId));
+      setLocalPatchLibrary(null);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setLocalPatchLibrary((current) => current ? { ...current, error: message } : current);
+      setImportError(message);
+    }
+  }, [loadPatchJson, localPatchLibrary]);
+
+  const savePatchJson = useCallback(async () => {
+    if (localPatchStorageEnabled) {
+      try {
+        await saveLocalPatchVersion(rootPatchName, exportedPatchJson);
+        setImportError(null);
+        showSaveFeedback();
+      } catch (error) {
+        setImportError(error instanceof Error ? error.message : String(error));
+      }
+      return;
+    }
+
     const blob = new Blob([exportedPatchJson], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -2321,7 +2444,17 @@ function NodeEditorInner() {
     link.click();
     link.remove();
     URL.revokeObjectURL(url);
-  }, [exportedPatchJson, rootPatchName]);
+    showSaveFeedback();
+  }, [exportedPatchJson, localPatchStorageEnabled, rootPatchName, showSaveFeedback]);
+
+  const requestPatchLoad = useCallback(() => {
+    if (localPatchStorageEnabled) {
+      void openLocalPatchLibrary();
+      return;
+    }
+
+    fileInputRef.current?.click();
+  }, [localPatchStorageEnabled, openLocalPatchLibrary]);
 
   const loadPatchFile = useCallback(async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.currentTarget.files?.[0];
@@ -2366,7 +2499,7 @@ function NodeEditorInner() {
     historyGroupRef.current = null;
     nodeDragHistoryRef.current = false;
     setHistory({ past: [], future: [] });
-    fitGraphToView();
+    fitGraphToView(NEW_PATCH_FIT_VIEW_PADDING);
   }, [
     fitGraphToView,
     insertNodeOnEdge,
@@ -2669,12 +2802,37 @@ function NodeEditorInner() {
     };
   }, [subpatchImportModal]);
 
+  useEffect(() => {
+    if (!localPatchLibrary) return;
+
+    const handleLocalPatchModalKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      event.stopPropagation();
+      setLocalPatchLibrary(null);
+    };
+
+    window.addEventListener('keydown', handleLocalPatchModalKeyDown, { capture: true });
+    return () => {
+      window.removeEventListener('keydown', handleLocalPatchModalKeyDown, { capture: true });
+    };
+  }, [localPatchLibrary]);
+
+  useEffect(() => {
+    if (!localPatchLibrary || localPatchLibrary.loading) return;
+    selectedLocalPatchOptionRef.current?.scrollIntoView({
+      block: 'nearest',
+      inline: 'nearest',
+    });
+  }, [localPatchLibrary]);
+
   const shellClassName = [
     'app-shell',
     sidePanelOpen && !uiHidden ? '' : 'app-shell-panel-closed',
     uiHidden ? 'app-shell-ui-hidden' : '',
     visualizationVisible ? '' : 'app-shell-visual-hidden',
   ].filter(Boolean).join(' ');
+  const selectedLocalPatch = localPatchLibrary?.patches.find((entry) => entry.name === localPatchLibrary.selectedPatchName) ?? null;
 
   return (
     <main
@@ -2781,20 +2939,26 @@ function NodeEditorInner() {
             NW
           </button>
           <button
-            className="viewport-button"
+            className={[
+              'viewport-button',
+              saveFeedbackActive ? 'viewport-button-save-confirmed' : '',
+            ].filter(Boolean).join(' ')}
             type="button"
-            onClick={savePatchJson}
-            aria-label="Save patch JSON"
-            title="Save patch JSON"
+            onClick={(event) => {
+              event.currentTarget.blur();
+              void savePatchJson();
+            }}
+            aria-label={localPatchStorageEnabled ? 'Save patch to patches directory' : 'Save patch JSON'}
+            title={localPatchStorageEnabled ? 'Save patch to patches directory' : 'Save patch JSON'}
           >
             SV
           </button>
           <button
             className="viewport-button"
             type="button"
-            onClick={() => fileInputRef.current?.click()}
-            aria-label="Load patch JSON"
-            title="Load patch JSON"
+            onClick={requestPatchLoad}
+            aria-label={localPatchStorageEnabled ? 'Load patch from patches directory' : 'Load patch JSON'}
+            title={localPatchStorageEnabled ? 'Load patch from patches directory' : 'Load patch JSON'}
           >
             LD
           </button>
@@ -2926,6 +3090,105 @@ function NodeEditorInner() {
           compileErrors={compileResult.errors}
           importError={importError}
         />
+      ) : null}
+      {localPatchLibrary ? (
+        <div
+          className="import-modal-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              closeLocalPatchLibrary();
+            }
+          }}
+        >
+          <section
+            className="import-modal local-patch-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="local-patch-modal-title"
+          >
+            <header className="import-modal-header">
+              <div>
+                <h2 id="local-patch-modal-title">Load patch</h2>
+                <p>patches/</p>
+              </div>
+              <button
+                className="import-modal-close"
+                type="button"
+                onClick={closeLocalPatchLibrary}
+                aria-label="Close patch loader"
+                title="Close"
+              >
+                X
+              </button>
+            </header>
+            {localPatchLibrary.loading || localPatchLibrary.error ? (
+              <p className={['import-modal-message', localPatchLibrary.error ? 'error' : ''].filter(Boolean).join(' ')}>
+                {localPatchLibrary.error ?? 'Reading saved patches...'}
+              </p>
+            ) : (
+              <div className="local-patch-browser">
+                <section className="local-patch-column" aria-label="Patches">
+                  <h3>PATCH</h3>
+                  <div className="local-patch-list" role="listbox" aria-label="Patches">
+                    {localPatchLibrary.patches.map((patchEntry) => (
+                      <button
+                        className={[
+                          'local-patch-option',
+                          patchEntry.name === localPatchLibrary.selectedPatchName ? 'local-patch-option-selected' : '',
+                        ].filter(Boolean).join(' ')}
+                        key={patchEntry.name}
+                        ref={patchEntry.name === localPatchLibrary.selectedPatchName ? selectedLocalPatchOptionRef : null}
+                        type="button"
+                        role="option"
+                        aria-selected={patchEntry.name === localPatchLibrary.selectedPatchName}
+                        onClick={() => selectLocalPatch(patchEntry)}
+                      >
+                        <span>{patchEntry.name}</span>
+                        <span>{patchEntry.versionCount}</span>
+                      </button>
+                    ))}
+                  </div>
+                </section>
+                <section className="local-patch-column" aria-label="Saved versions">
+                  <h3>SAVED AT</h3>
+                  <div className="local-patch-list" role="listbox" aria-label="Saved versions">
+                    {selectedLocalPatch?.versions.map((version) => (
+                      <button
+                        className={[
+                          'local-patch-option',
+                          version.id === localPatchLibrary.selectedVersionId ? 'local-patch-option-selected' : '',
+                        ].filter(Boolean).join(' ')}
+                        key={version.id}
+                        type="button"
+                        role="option"
+                        aria-selected={version.id === localPatchLibrary.selectedVersionId}
+                        onClick={() => selectLocalPatchVersion(version)}
+                        onDoubleClick={() => {
+                          void loadSelectedLocalPatch();
+                        }}
+                      >
+                        <span>{formatSavedPatchTimestamp(version.savedAt)}</span>
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              </div>
+            )}
+            <footer className="import-modal-actions">
+              <button type="button" onClick={closeLocalPatchLibrary}>Cancel</button>
+              <button
+                type="button"
+                onClick={() => {
+                  void loadSelectedLocalPatch();
+                }}
+                disabled={!localPatchLibrary.selectedPatchName || !localPatchLibrary.selectedVersionId}
+              >
+                Load
+              </button>
+            </footer>
+          </section>
+        </div>
       ) : null}
       {subpatchImportModal ? (
         <div
@@ -3433,13 +3696,13 @@ function emptyRootPatch(): Patch {
         id: 'system_1',
         type: 'System',
         params: {},
-        position: { x: 40, y: 160 },
+        position: EMPTY_PATCH_SYSTEM_POSITION,
       },
       {
         id: 'output_1',
         type: 'Output',
         params: defaultParamsFor('Output'),
-        position: { x: 360, y: 160 },
+        position: EMPTY_PATCH_OUTPUT_POSITION,
       },
     ],
     links: [],
@@ -4771,6 +5034,132 @@ function clampInteger(value: number, min: number, max: number): number {
   if (!Number.isFinite(value)) return min;
   const rounded = Math.round(value);
   return Math.max(min, Math.min(max, rounded));
+}
+
+function canUseLocalPatchStorage(): boolean {
+  const viteEnv = (import.meta as ImportMeta & {
+    env?: {
+      DEV?: boolean;
+      VITE_VISUAL_VISUAL_PATCH_STORAGE?: string;
+    };
+  }).env;
+  const storageMode = viteEnv?.VITE_VISUAL_VISUAL_PATCH_STORAGE;
+  if (storageMode === 'browser') return false;
+  if (storageMode === 'local') return true;
+  return viteEnv?.DEV === true;
+}
+
+async function fetchLocalPatchLibrary(): Promise<LocalPatchEntry[]> {
+  const response = await fetch('/api/local-patches', {
+    method: 'GET',
+    headers: { Accept: 'application/json' },
+  });
+
+  if (!response.ok) {
+    throw new Error(await localPatchStorageError(response));
+  }
+
+  const payload = await response.json() as unknown;
+  if (!isRecord(payload) || !Array.isArray(payload.patches)) {
+    throw new Error('Local patch library response was not valid.');
+  }
+
+  return payload.patches.flatMap((entry): LocalPatchEntry[] => {
+    if (!isRecord(entry) || typeof entry.name !== 'string' || !Array.isArray(entry.versions)) return [];
+
+    const versions = entry.versions.flatMap((version): LocalPatchVersion[] => (
+      isRecord(version) && typeof version.id === 'string' && typeof version.savedAt === 'string'
+        ? [{ id: version.id, savedAt: version.savedAt }]
+        : []
+    ));
+
+    return [{
+      name: entry.name,
+      versionCount: typeof entry.versionCount === 'number' ? entry.versionCount : versions.length,
+      versions,
+    }];
+  });
+}
+
+function selectInitialLocalPatch(patches: LocalPatchEntry[], currentPatchName: string): LocalPatchEntry | null {
+  const trimmedName = currentPatchName.trim();
+  if (!trimmedName) return patches[0] ?? null;
+
+  const storageName = sanitizeLocalPatchStorageSegment(trimmedName);
+  const normalizedName = trimmedName.toLowerCase();
+  const normalizedStorageName = storageName.toLowerCase();
+
+  return patches.find((entry) => (
+    entry.name === trimmedName ||
+    entry.name === storageName ||
+    entry.name.toLowerCase() === normalizedName ||
+    entry.name.toLowerCase() === normalizedStorageName
+  )) ?? patches[0] ?? null;
+}
+
+function sanitizeLocalPatchStorageSegment(name: string): string {
+  const cleaned = name
+    .trim()
+    .replace(/[<>:"/\\|?*\u0000-\u001f]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^\.+/, '')
+    .replace(/\.+$/, '');
+
+  return cleaned || 'untitled-patch';
+}
+
+async function saveLocalPatchVersion(patchName: string, patchJson: string): Promise<void> {
+  const response = await fetch('/api/local-patches', {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ name: patchName, patchJson }),
+  });
+
+  if (!response.ok) {
+    throw new Error(await localPatchStorageError(response));
+  }
+}
+
+async function fetchLocalPatchVersion(patchName: string, versionId: string): Promise<string> {
+  const params = new URLSearchParams({
+    patch: patchName,
+    version: versionId,
+  });
+  const response = await fetch(`/api/local-patches/version?${params.toString()}`, {
+    method: 'GET',
+    headers: { Accept: 'application/json' },
+  });
+
+  if (!response.ok) {
+    throw new Error(await localPatchStorageError(response));
+  }
+
+  return response.text();
+}
+
+async function localPatchStorageError(response: Response): Promise<string> {
+  const message = await response.text();
+  return message || `Local patch storage failed with HTTP ${response.status}.`;
+}
+
+function formatSavedPatchTimestamp(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+
+  const year = date.getFullYear();
+  const month = padDatePart(date.getMonth() + 1);
+  const day = padDatePart(date.getDate());
+  const hour = padDatePart(date.getHours());
+  const minute = padDatePart(date.getMinutes());
+  const second = padDatePart(date.getSeconds());
+  return `${year}-${month}-${day} ${hour}:${minute}:${second}`;
+}
+
+function padDatePart(value: number): string {
+  return String(value).padStart(2, '0');
 }
 
 function loadMidiCcValues(): MidiCcValueMap {

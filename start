@@ -8,6 +8,40 @@ CERT_CERT="$CERT_DIR/visual-visual.crt"
 CERT_CONFIG="$CERT_DIR/visual-visual.openssl.cnf"
 CERT_HOSTS_FILE="$CERT_DIR/visual-visual.hosts"
 HTTPS_ENABLED=0
+PATCH_STORAGE="${VITE_VISUAL_VISUAL_PATCH_STORAGE:-local}"
+
+usage() {
+  printf 'Usage: ./start [--patch-storage=local|browser]\n'
+  printf '       ./start [--local-storage|--browser-storage]\n'
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --patch-storage=local)
+      PATCH_STORAGE="local"
+      ;;
+    --patch-storage=browser)
+      PATCH_STORAGE="browser"
+      ;;
+    --local-storage)
+      PATCH_STORAGE="local"
+      ;;
+    --browser-storage)
+      PATCH_STORAGE="browser"
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      usage >&2
+      exit 2
+      ;;
+  esac
+  shift
+done
+
+export VITE_VISUAL_VISUAL_PATCH_STORAGE="$PATCH_STORAGE"
 
 LAN_IP=""
 if command -v ipconfig >/dev/null 2>&1; then
@@ -119,6 +153,11 @@ if [ "$READY" -eq 1 ]; then
   if [ -n "$LAN_IP" ]; then
     printf '  Editor for another device: %s://%s:5173/\n' "$SCHEME" "$LAN_IP"
     printf '  Viewer for projector: %s://%s:5173/viewer\n' "$SCHEME" "$LAN_IP"
+  fi
+  if [ "$PATCH_STORAGE" = "local" ]; then
+    printf '  Patch storage: local server patches/ directory. SV and LD use the server from localhost and LAN clients.\n'
+  else
+    printf '  Patch storage: browser file download/upload. SV downloads JSON and LD opens a file picker.\n'
   fi
   printf '  Note: Vite may print a Docker-internal 172.x network URL above; use the host URLs here.\n'
   if [ "$HTTPS_ENABLED" -eq 1 ]; then
