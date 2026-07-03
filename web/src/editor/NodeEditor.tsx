@@ -113,6 +113,27 @@ interface LocalPatchLibraryState {
   error: string | null;
 }
 
+interface LocalSubpatchImportSource {
+  key: string;
+  patchName: string;
+  versionId: string;
+  savedAt: string;
+  candidate: ImportedSubpatchCandidate;
+}
+
+interface LocalSubpatchImportEntry {
+  name: string;
+  sources: LocalSubpatchImportSource[];
+}
+
+interface LocalSubpatchImportState {
+  subpatches: LocalSubpatchImportEntry[];
+  selectedSubpatchName: string | null;
+  selectedSourceKey: string | null;
+  loading: boolean;
+  error: string | null;
+}
+
 interface DraftNodeConnection {
   originNodeId: string;
   originHandleId: string;
@@ -191,11 +212,13 @@ function NodeEditorInner() {
   const [importError, setImportError] = useState<string | null>(null);
   const [uiHidden, setUiHidden] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [newPatchConfirmationOpen, setNewPatchConfirmationOpen] = useState(false);
   const [viewport, setViewport] = useState<Viewport>(initialState?.ui?.viewport ?? { x: 0, y: 0, zoom: 1 });
   const [viewportForBounds, setViewportForBounds] = useState<Viewport>(initialState?.ui?.viewport ?? { x: 0, y: 0, zoom: 1 });
   const [editorSize, setEditorSize] = useState<EditorSize>({ width: 0, height: 0 });
   const [subpatchImportModal, setSubpatchImportModal] = useState<SubpatchImportModalState | null>(null);
   const [localPatchLibrary, setLocalPatchLibrary] = useState<LocalPatchLibraryState | null>(null);
+  const [localSubpatchImport, setLocalSubpatchImport] = useState<LocalSubpatchImportState | null>(null);
   const [fps, setFps] = useState(0);
   const [reactFlow, setReactFlow] = useState<ReactFlowInstance<ShaderFlowNode, ShaderFlowEdge> | null>(null);
   const [edgeOverlayElement, setEdgeOverlayElement] = useState<HTMLElement | null>(null);
@@ -1559,6 +1582,8 @@ function NodeEditorInner() {
     [compileEdgesWithPreview, editingStack, nodesWithCallbacks, patchName],
   );
   const rootPatchName = editingStack[0]?.parentPatchName ?? patchName;
+  const trimmedRootPatchName = rootPatchName.trim();
+  const saveDisabled = localPatchStorageEnabled && trimmedRootPatchName.length === 0;
   const isEditingSubpatch = editingStack.length > 0;
   const patch = useMemo(() => patchFromFlow(materializedGraph.nodes, materializedGraph.edges), [materializedGraph]);
   const compilePatch = useMemo(() => patchFromFlow(materializedCompileGraph.nodes, materializedCompileGraph.edges), [materializedCompileGraph]);
@@ -2423,10 +2448,82 @@ function NodeEditorInner() {
     }
   }, [loadPatchJson, localPatchLibrary]);
 
+  const openLocalSubpatchImport = useCallback(async () => {
+    setSubpatchImportModal(null);
+    setLocalSubpatchImport({
+      subpatches: [],
+      selectedSubpatchName: null,
+      selectedSourceKey: null,
+      loading: true,
+      error: null,
+    });
+
+    try {
+      const patches = await fetchLocalPatchLibrary();
+      const subpatches = await buildLocalSubpatchImportEntries(patches);
+      const selectedSubpatch = subpatches[0] ?? null;
+      setLocalSubpatchImport({
+        subpatches,
+        selectedSubpatchName: selectedSubpatch?.name ?? null,
+        selectedSourceKey: selectedSubpatch?.sources[0]?.key ?? null,
+        loading: false,
+        error: subpatches.length === 0 ? 'No saved subpatches found in patches/.' : null,
+      });
+      setImportError(null);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setLocalSubpatchImport({
+        subpatches: [],
+        selectedSubpatchName: null,
+        selectedSourceKey: null,
+        loading: false,
+        error: message,
+      });
+      setImportError(message);
+    }
+  }, []);
+
+  const closeLocalSubpatchImport = useCallback(() => {
+    setLocalSubpatchImport(null);
+  }, []);
+
+  const selectLocalSubpatch = useCallback((entry: LocalSubpatchImportEntry) => {
+    setLocalSubpatchImport((current) => current ? {
+      ...current,
+      selectedSubpatchName: entry.name,
+      selectedSourceKey: entry.sources[0]?.key ?? null,
+    } : current);
+  }, []);
+
+  const selectLocalSubpatchSource = useCallback((source: LocalSubpatchImportSource) => {
+    setLocalSubpatchImport((current) => current ? {
+      ...current,
+      selectedSourceKey: source.key,
+    } : current);
+  }, []);
+
+  const requestSubpatchImport = useCallback(() => {
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
+
+    if (localPatchStorageEnabled) {
+      void openLocalSubpatchImport();
+      return;
+    }
+
+    importFileInputRef.current?.click();
+  }, [localPatchStorageEnabled, openLocalSubpatchImport]);
+
   const savePatchJson = useCallback(async () => {
     if (localPatchStorageEnabled) {
+      if (trimmedRootPatchName.length === 0) {
+        setImportError('Enter a patch name before saving locally.');
+        return;
+      }
+
       try {
-        await saveLocalPatchVersion(rootPatchName, exportedPatchJson);
+        await saveLocalPatchVersion(trimmedRootPatchName, exportedPatchJson);
         setImportError(null);
         showSaveFeedback();
       } catch (error) {
@@ -2445,7 +2542,7 @@ function NodeEditorInner() {
     link.remove();
     URL.revokeObjectURL(url);
     showSaveFeedback();
-  }, [exportedPatchJson, localPatchStorageEnabled, rootPatchName, showSaveFeedback]);
+  }, [exportedPatchJson, localPatchStorageEnabled, rootPatchName, showSaveFeedback, trimmedRootPatchName]);
 
   const requestPatchLoad = useCallback(() => {
     if (localPatchStorageEnabled) {
@@ -2469,8 +2566,10 @@ function NodeEditorInner() {
   }, [loadPatchJson]);
 
   const newPatch = useCallback(() => {
-    if (!window.confirm('Start a new empty patch? Unsaved changes will be lost.')) return;
+    setNewPatchConfirmationOpen(true);
+  }, []);
 
+  const confirmNewPatch = useCallback(() => {
     const emptyPatch = emptyRootPatch();
     setNodes(toFlowNodes(
       emptyPatch,
@@ -2486,7 +2585,7 @@ function NodeEditorInner() {
     ));
     setEdges(toFlowEdges(emptyPatch, updateEdgeWeight, insertNodeOnEdge));
     setEditingStack([]);
-    setPatchName('untitled-patch');
+    setPatchName(localPatchStorageEnabled ? '' : 'untitled-patch');
     setEditingTypeNodeId(null);
     setPendingBoundaryPort(null);
     setSelectedBoundaryPort(null);
@@ -2499,11 +2598,13 @@ function NodeEditorInner() {
     historyGroupRef.current = null;
     nodeDragHistoryRef.current = false;
     setHistory({ past: [], future: [] });
+    setNewPatchConfirmationOpen(false);
     fitGraphToView(NEW_PATCH_FIT_VIEW_PADDING);
   }, [
     fitGraphToView,
     insertNodeOnEdge,
     insertNodeOnPort,
+    localPatchStorageEnabled,
     updateBoundaryPortName,
     updateBoundaryPortOrder,
     updateDraftNodeConnection,
@@ -2522,6 +2623,7 @@ function NodeEditorInner() {
     try {
       const importedPatch = parsePatchJson(await file.text());
       const candidates = collectSubpatchImportCandidates(importedPatch);
+      setLocalSubpatchImport(null);
       setSubpatchImportModal({
         fileName: file.name,
         candidates,
@@ -2531,6 +2633,7 @@ function NodeEditorInner() {
       setImportError(null);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      setLocalSubpatchImport(null);
       setSubpatchImportModal({
         fileName: file.name,
         candidates: [],
@@ -2594,6 +2697,7 @@ function NodeEditorInner() {
     setEdges((current) => current.map((edge) => ({ ...edge, selected: false })));
     setEditingTypeNodeId(null);
     setSubpatchImportModal(null);
+    setLocalSubpatchImport(null);
   }, [commitHistory, reactFlow]);
 
   const importSelectedSubpatch = useCallback(() => {
@@ -2603,6 +2707,16 @@ function NodeEditorInner() {
 
     importSubpatchCandidate(candidate);
   }, [importSubpatchCandidate, subpatchImportModal]);
+
+  const importSelectedLocalSubpatch = useCallback(() => {
+    const selectedSourceKey = localSubpatchImport?.selectedSourceKey;
+    const source = localSubpatchImport?.subpatches
+      .flatMap((entry) => entry.sources)
+      .find((entry) => entry.key === selectedSourceKey);
+    if (!source) return;
+
+    importSubpatchCandidate(source.candidate);
+  }, [importSubpatchCandidate, localSubpatchImport]);
 
   const restoreSnapshot = useCallback((snapshot: GraphSnapshot) => {
     const state: PersistedEditorState = {
@@ -2803,6 +2917,22 @@ function NodeEditorInner() {
   }, [subpatchImportModal]);
 
   useEffect(() => {
+    if (!newPatchConfirmationOpen) return;
+
+    const handleNewPatchModalKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      event.stopPropagation();
+      setNewPatchConfirmationOpen(false);
+    };
+
+    window.addEventListener('keydown', handleNewPatchModalKeyDown, { capture: true });
+    return () => {
+      window.removeEventListener('keydown', handleNewPatchModalKeyDown, { capture: true });
+    };
+  }, [newPatchConfirmationOpen]);
+
+  useEffect(() => {
     if (!localPatchLibrary) return;
 
     const handleLocalPatchModalKeyDown = (event: KeyboardEvent) => {
@@ -2819,6 +2949,22 @@ function NodeEditorInner() {
   }, [localPatchLibrary]);
 
   useEffect(() => {
+    if (!localSubpatchImport) return;
+
+    const handleLocalSubpatchImportKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      event.stopPropagation();
+      setLocalSubpatchImport(null);
+    };
+
+    window.addEventListener('keydown', handleLocalSubpatchImportKeyDown, { capture: true });
+    return () => {
+      window.removeEventListener('keydown', handleLocalSubpatchImportKeyDown, { capture: true });
+    };
+  }, [localSubpatchImport]);
+
+  useEffect(() => {
     if (!localPatchLibrary || localPatchLibrary.loading) return;
     selectedLocalPatchOptionRef.current?.scrollIntoView({
       block: 'nearest',
@@ -2833,6 +2979,7 @@ function NodeEditorInner() {
     visualizationVisible ? '' : 'app-shell-visual-hidden',
   ].filter(Boolean).join(' ');
   const selectedLocalPatch = localPatchLibrary?.patches.find((entry) => entry.name === localPatchLibrary.selectedPatchName) ?? null;
+  const selectedLocalSubpatch = localSubpatchImport?.subpatches.find((entry) => entry.name === localSubpatchImport.selectedSubpatchName) ?? null;
 
   return (
     <main
@@ -2888,47 +3035,9 @@ function NodeEditorInner() {
               aria-label="Exit subpatch"
               title="Exit subpatch"
             >
-              EX
+              EXIT
             </button>
           ) : null}
-          <button
-            className="viewport-button"
-            type="button"
-            onClick={() => setVisualizationVisible((visible) => !visible)}
-            aria-label={visualizationVisible ? 'Hide visualization' : 'Show visualization'}
-            aria-pressed={visualizationVisible}
-            title={visualizationVisible ? 'Hide visualization' : 'Show visualization'}
-          >
-            SH
-          </button>
-          <button
-            className="viewport-button"
-            type="button"
-            onClick={groupSelectedNodes}
-            disabled={!canGroupSelection}
-            aria-label="Group selected nodes"
-            title="Group selected nodes"
-          >
-            GR
-          </button>
-          <button
-            className="viewport-button"
-            type="button"
-            onClick={() => previewRef.current?.downloadScreenshot()}
-            aria-label="Save screenshot PNG"
-            title="Save screenshot PNG"
-          >
-            SS
-          </button>
-          <button
-            className="viewport-button side-panel-toggle"
-            type="button"
-            onClick={() => setSidePanelOpen((open) => !open)}
-            aria-label={sidePanelOpen ? 'Hide GLSL panel' : 'Show GLSL panel'}
-            title={sidePanelOpen ? 'Hide GLSL panel' : 'Show GLSL panel'}
-          >
-            GL
-          </button>
           <button
             className="viewport-button"
             type="button"
@@ -2936,7 +3045,7 @@ function NodeEditorInner() {
             aria-label="New empty patch"
             title="New empty patch"
           >
-            NW
+            NEW
           </button>
           <button
             className={[
@@ -2948,10 +3057,15 @@ function NodeEditorInner() {
               event.currentTarget.blur();
               void savePatchJson();
             }}
+            disabled={saveDisabled}
             aria-label={localPatchStorageEnabled ? 'Save patch to patches directory' : 'Save patch JSON'}
-            title={localPatchStorageEnabled ? 'Save patch to patches directory' : 'Save patch JSON'}
+            title={saveDisabled
+              ? 'Enter a patch name before saving locally'
+              : localPatchStorageEnabled
+                ? 'Save patch to patches directory'
+                : 'Save patch JSON'}
           >
-            SV
+            SAVE
           </button>
           <button
             className="viewport-button"
@@ -2960,16 +3074,7 @@ function NodeEditorInner() {
             aria-label={localPatchStorageEnabled ? 'Load patch from patches directory' : 'Load patch JSON'}
             title={localPatchStorageEnabled ? 'Load patch from patches directory' : 'Load patch JSON'}
           >
-            LD
-          </button>
-          <button
-            className="viewport-button"
-            type="button"
-            onClick={() => importFileInputRef.current?.click()}
-            aria-label="Import subpatch from patch JSON"
-            title="Import subpatch"
-          >
-            IM
+            LOAD
           </button>
           <button
             className="viewport-button viewport-button-history"
@@ -2979,7 +3084,7 @@ function NodeEditorInner() {
             aria-label="Undo"
             title="Undo"
           >
-            UN
+            UNDO
           </button>
           <button
             className="viewport-button viewport-button-history"
@@ -2989,26 +3094,96 @@ function NodeEditorInner() {
             aria-label="Redo"
             title="Redo"
           >
-            RE
+            REDO
           </button>
-          <button
-            className="viewport-button"
-            type="button"
-            onClick={toggleFullscreen}
-            aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
-            title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
-          >
-            FS
-          </button>
-          <button
-            className="viewport-button viewport-button-ui"
-            type="button"
-            onClick={() => setUiHidden(true)}
-            aria-label="Hide UI"
-            title="Hide UI"
-          >
-            UI
-          </button>
+          <div className="viewport-more">
+            <button
+              className="viewport-button viewport-more-trigger"
+              type="button"
+              aria-haspopup="menu"
+              aria-label="More actions"
+              title="More actions"
+            >
+              MORE ˆ
+            </button>
+            <div className="viewport-more-menu" role="menu" aria-label="More actions">
+              <button
+                className="viewport-button"
+                type="button"
+                onClick={groupSelectedNodes}
+                disabled={!canGroupSelection}
+                aria-label="Group to subpatch"
+                title="Group to subpatch"
+                role="menuitem"
+              >
+                GROUP TO SUBPATCH
+              </button>
+              <button
+                className="viewport-button"
+                type="button"
+                onClick={requestSubpatchImport}
+                aria-label="Import subpatch from patch JSON"
+                title="Import subpatch"
+                role="menuitem"
+              >
+                IMPORT SUBPATCH
+              </button>
+              <button
+                className="viewport-button"
+                type="button"
+                onClick={() => previewRef.current?.downloadScreenshot()}
+                aria-label="Save screenshot PNG"
+                title="Save screenshot PNG"
+                role="menuitem"
+              >
+                SAVE SCREENSHOT
+              </button>
+              <button
+                className="viewport-button side-panel-toggle"
+                type="button"
+                onClick={() => setSidePanelOpen((open) => !open)}
+                aria-label="Toggle GLSL panel"
+                aria-checked={sidePanelOpen}
+                title="Toggle GLSL"
+                role="menuitemcheckbox"
+              >
+                TOGGLE GLSL
+              </button>
+              <button
+                className="viewport-button"
+                type="button"
+                onClick={() => setVisualizationVisible((visible) => !visible)}
+                aria-label="Toggle visuals"
+                aria-checked={visualizationVisible}
+                title="Toggle visuals (Cmd-Shift-S)"
+                role="menuitemcheckbox"
+              >
+                TOGGLE VISUALS
+              </button>
+              <button
+                className="viewport-button"
+                type="button"
+                onClick={toggleFullscreen}
+                aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+                aria-checked={isFullscreen}
+                title="Toggle fullscreen (Cmd-Shift-F)"
+                role="menuitemcheckbox"
+              >
+                TOGGLE FULLSCREEN
+              </button>
+              <button
+                className="viewport-button viewport-button-ui"
+                type="button"
+                onClick={() => setUiHidden(true)}
+                aria-label="Toggle UI"
+                aria-checked={!uiHidden}
+                title="Toggle UI (Cmd-Shift-U)"
+                role="menuitemcheckbox"
+              >
+                TOGGLE UI
+              </button>
+            </div>
+          </div>
           <input
             ref={fileInputRef}
             className="panel-file-input"
@@ -3090,6 +3265,47 @@ function NodeEditorInner() {
           compileErrors={compileResult.errors}
           importError={importError}
         />
+      ) : null}
+      {newPatchConfirmationOpen ? (
+        <div
+          className="import-modal-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              setNewPatchConfirmationOpen(false);
+            }
+          }}
+        >
+          <section
+            className="import-modal confirm-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="new-patch-modal-title"
+            aria-describedby="new-patch-modal-message"
+          >
+            <header className="import-modal-header">
+              <div>
+                <h2 id="new-patch-modal-title">New patch</h2>
+              </div>
+              <button
+                className="import-modal-close"
+                type="button"
+                onClick={() => setNewPatchConfirmationOpen(false)}
+                aria-label="Close new patch confirmation"
+                title="Close"
+              >
+                X
+              </button>
+            </header>
+            <p className="import-modal-message" id="new-patch-modal-message">
+              Start a new empty patch? Unsaved changes will be lost.
+            </p>
+            <footer className="import-modal-actions">
+              <button type="button" onClick={() => setNewPatchConfirmationOpen(false)}>Cancel</button>
+              <button type="button" onClick={confirmNewPatch}>New patch</button>
+            </footer>
+          </section>
+        </div>
       ) : null}
       {localPatchLibrary ? (
         <div
@@ -3185,6 +3401,101 @@ function NodeEditorInner() {
                 disabled={!localPatchLibrary.selectedPatchName || !localPatchLibrary.selectedVersionId}
               >
                 Load
+              </button>
+            </footer>
+          </section>
+        </div>
+      ) : null}
+      {localSubpatchImport ? (
+        <div
+          className="import-modal-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              closeLocalSubpatchImport();
+            }
+          }}
+        >
+          <section
+            className="import-modal local-patch-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="local-subpatch-import-title"
+          >
+            <header className="import-modal-header">
+              <div>
+                <h2 id="local-subpatch-import-title">Import subpatch</h2>
+                <p>patches/</p>
+              </div>
+              <button
+                className="import-modal-close"
+                type="button"
+                onClick={closeLocalSubpatchImport}
+                aria-label="Close subpatch import"
+                title="Close"
+              >
+                X
+              </button>
+            </header>
+            {localSubpatchImport.loading || localSubpatchImport.error ? (
+              <p className={['import-modal-message', localSubpatchImport.error ? 'error' : ''].filter(Boolean).join(' ')}>
+                {localSubpatchImport.error ?? 'Reading saved subpatches...'}
+              </p>
+            ) : (
+              <div className="local-patch-browser">
+                <section className="local-patch-column" aria-label="Subpatches">
+                  <h3>SUBPATCH</h3>
+                  <div className="local-patch-list" role="listbox" aria-label="Subpatches">
+                    {localSubpatchImport.subpatches.map((entry) => (
+                      <button
+                        className={[
+                          'local-patch-option',
+                          entry.name === localSubpatchImport.selectedSubpatchName ? 'local-patch-option-selected' : '',
+                        ].filter(Boolean).join(' ')}
+                        key={entry.name}
+                        type="button"
+                        role="option"
+                        aria-selected={entry.name === localSubpatchImport.selectedSubpatchName}
+                        onClick={() => selectLocalSubpatch(entry)}
+                      >
+                        <span>{entry.name}</span>
+                        <span>{entry.sources.length}</span>
+                      </button>
+                    ))}
+                  </div>
+                </section>
+                <section className="local-patch-column" aria-label="Subpatch sources">
+                  <h3>SOURCE</h3>
+                  <div className="local-patch-list" role="listbox" aria-label="Subpatch sources">
+                    {selectedLocalSubpatch?.sources.map((source) => (
+                      <button
+                        className={[
+                          'local-patch-option',
+                          source.key === localSubpatchImport.selectedSourceKey ? 'local-patch-option-selected' : '',
+                        ].filter(Boolean).join(' ')}
+                        key={source.key}
+                        type="button"
+                        role="option"
+                        aria-selected={source.key === localSubpatchImport.selectedSourceKey}
+                        onClick={() => selectLocalSubpatchSource(source)}
+                        onDoubleClick={importSelectedLocalSubpatch}
+                      >
+                        <span>{source.patchName}</span>
+                        <span>{formatSavedPatchTimestamp(source.savedAt)}</span>
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              </div>
+            )}
+            <footer className="import-modal-actions">
+              <button type="button" onClick={closeLocalSubpatchImport}>Cancel</button>
+              <button
+                type="button"
+                onClick={importSelectedLocalSubpatch}
+                disabled={!localSubpatchImport.selectedSourceKey || localSubpatchImport.subpatches.length === 0}
+              >
+                Import
               </button>
             </footer>
           </section>
@@ -3663,6 +3974,48 @@ function collectSubpatchImportCandidates(patch: Patch): ImportedSubpatchCandidat
 
   visit(patch, []);
   return candidates;
+}
+
+async function buildLocalSubpatchImportEntries(patches: LocalPatchEntry[]): Promise<LocalSubpatchImportEntry[]> {
+  const sourcesBySubpatchName = new Map<string, LocalSubpatchImportSource[]>();
+  const versionTasks = patches.flatMap((patchEntry) => patchEntry.versions.map(async (version) => {
+    const patch = parsePatchJson(await fetchLocalPatchVersion(patchEntry.name, version.id));
+    collectSubpatchImportCandidates(patch).forEach((candidate) => {
+      const key = `${patchEntry.name}/${version.id}/${candidate.key}`;
+      const source: LocalSubpatchImportSource = {
+        key,
+        patchName: patchEntry.name,
+        versionId: version.id,
+        savedAt: version.savedAt,
+        candidate: { ...candidate, key },
+      };
+      const sources = sourcesBySubpatchName.get(candidate.name);
+      if (sources) {
+        sources.push(source);
+      } else {
+        sourcesBySubpatchName.set(candidate.name, [source]);
+      }
+    });
+  }));
+
+  await Promise.all(versionTasks);
+
+  return Array.from(sourcesBySubpatchName.entries())
+    .map(([name, sources]) => ({
+      name,
+      sources: sources.sort(compareLocalSubpatchSources),
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function compareLocalSubpatchSources(a: LocalSubpatchImportSource, b: LocalSubpatchImportSource): number {
+  const savedAtDelta = Date.parse(b.savedAt) - Date.parse(a.savedAt);
+  if (Number.isFinite(savedAtDelta) && savedAtDelta !== 0) return savedAtDelta;
+
+  const patchNameDelta = a.patchName.localeCompare(b.patchName);
+  if (patchNameDelta !== 0) return patchNameDelta;
+
+  return b.versionId.localeCompare(a.versionId);
 }
 
 function flowPositionForNewImport(

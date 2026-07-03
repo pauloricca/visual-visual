@@ -156,6 +156,7 @@ select:hover {
   display: flex;
   gap: 6px;
   align-items: center;
+  max-width: calc(100% - (var(--viewport-inset) * 2));
 }
 
 .patch-name-input {
@@ -180,14 +181,65 @@ select:hover {
 }
 
 .viewport-button {
-  width: var(--control-size);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--control-size);
   height: var(--control-size);
-  padding: 0;
+  padding: 0 8px;
   border: 1px solid #fff;
   background: var(--surface-bg);
   color: #fff;
   line-height: 26px;
   text-align: center;
+  white-space: nowrap;
+}
+
+.viewport-more {
+  position: relative;
+  display: flex;
+}
+
+.viewport-more::before {
+  position: absolute;
+  right: 0;
+  bottom: 100%;
+  display: none;
+  width: 202px;
+  height: 6px;
+  content: '';
+}
+
+.viewport-more-menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 6px);
+  display: none;
+  width: max-content;
+  min-width: 202px;
+  flex-direction: column;
+  gap: 6px;
+  align-items: stretch;
+}
+
+.viewport-more:hover .viewport-more-menu,
+.viewport-more:focus-within .viewport-more-menu,
+.viewport-more:hover::before,
+.viewport-more:focus-within::before {
+  display: flex;
+}
+
+.viewport-more-menu .viewport-button {
+  position: relative;
+  width: 100%;
+  justify-content: flex-start;
+  text-align: left;
+}
+
+.viewport-more-menu .viewport-button::before {
+  position: absolute;
+  inset: -10px -14px -3px;
+  content: '';
 }
 
 .viewport-button:disabled {
@@ -196,21 +248,29 @@ select:hover {
 }
 
 .viewport-button:disabled:hover,
-.viewport-button:disabled:focus {
+.viewport-button:disabled:focus-visible {
   background: var(--surface-bg);
   color: rgba(255, 255, 255, 0.34);
 }
 
 .viewport-button:hover,
-.viewport-button:focus {
+.viewport-button:focus-visible {
   background: #fff;
+  color: #000;
+  outline: 0;
+}
+
+.viewport-button[aria-checked='true'],
+.viewport-button[aria-checked='true']:hover,
+.viewport-button[aria-checked='true']:focus-visible {
+  background: #7cff00;
   color: #000;
   outline: 0;
 }
 
 .viewport-button-save-confirmed,
 .viewport-button-save-confirmed:hover,
-.viewport-button-save-confirmed:focus {
+.viewport-button-save-confirmed:focus-visible {
   background: #7cff00;
   color: #000;
   outline: 0;
@@ -1064,6 +1124,10 @@ select:hover {
   width: min(920px, 100%);
 }
 
+.confirm-modal {
+  width: min(420px, 100%);
+}
+
 .import-modal-header {
   display: flex;
   align-items: flex-start;
@@ -1098,7 +1162,6 @@ select:hover {
 
 .import-modal-message {
   padding: 12px;
-  border-bottom: 1px solid #fff;
 }
 
 .import-subpatch-list {
@@ -1118,6 +1181,10 @@ select:hover {
   background: transparent;
   text-align: left;
   line-height: 1.25;
+}
+
+.import-subpatch-option:last-child {
+  border-bottom: 0;
 }
 
 .import-subpatch-option:hover,
@@ -1296,8 +1363,16 @@ select:hover {
     grid-template-rows: minmax(420px, 1fr) 360px;
   }
 
+  .app-shell-panel-closed {
+    grid-template-rows: minmax(0, 1fr);
+  }
+
   .editor-shell {
     border-right: 0;
     border-bottom: 1px solid #fff;
+  }
+
+  .app-shell-panel-closed .editor-shell {
+    border-bottom: 0;
   }
 }
