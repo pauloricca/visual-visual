@@ -8,6 +8,12 @@
   "scripts": {
     "dev": "npm --workspace web run dev",
     "build": "npm --workspace web run build",
-    "typecheck": "npm --workspace web run typecheck"
+    "typecheck": "npm --workspace web run typecheck",
+    "test": "node scripts/test.mjs",
+    "benchmark": "node benchmarks/compare.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "0.27.7",
+    "playwright": "1.61.1"
   }
 }

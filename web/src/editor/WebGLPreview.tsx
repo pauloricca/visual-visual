@@ -895,6 +895,14 @@ function blitScopePreviews(
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, resources.scopeTextures[index]);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+    // Draw into the node's own surface so cables cannot cover the scope image.
+    // Legacy hosts without a target canvas keep the background blit above.
+    if (element instanceof HTMLCanvasElement) {
+      if (element.width !== width) element.width = width;
+      if (element.height !== height) element.height = height;
+      element.getContext('2d')?.drawImage(canvas, x, canvas.height - y - height, width, height, 0, 0, width, height);
+    }
   }
 
   gl.disable(gl.SCISSOR_TEST);

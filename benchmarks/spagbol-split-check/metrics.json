@@ -1,0 +1,39 @@
+{
+  "label": "spagbol-split-check",
+  "url": "http://127.0.0.1:5175",
+  "browser": "156.0.8078.80",
+  "timestamp": "2026-11-08T23:35:51.033Z",
+  "results": [
+    {
+      "width": 1440,
+      "count": 107,
+      "visibleNodes": 107,
+      "run": 0,
+      "readyMs": 441,
+      "frames": {
+        "median": 16.664999999999964,
+        "p95": 16.670000000000073,
+        "max": 66.66499999999996,
+        "count": 201
+      },
+      "pointerToFrameMs": {
+        "median": 0.24499988555908203,
+        "p95": 0.625,
+        "max": 63.30000019073486,
+        "count": 122
+      },
+      "longTasks": 1,
+      "longTaskMs": 69,
+      "heapBytes": 36269565,
+      "cpuSeconds": {
+        "TaskDuration": 2.032664,
+        "ScriptDuration": 1.421371,
+        "LayoutDuration": 0.023536,
+        "RecalcStyleDuration": 0.022173
+      },
+      "dragCpuSeconds": 1.919871,
+      "panCpuSeconds": 0.11279299999999992,
+      "errors": []
+    }
+  ]
+}

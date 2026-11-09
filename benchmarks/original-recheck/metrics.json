@@ -1,0 +1,380 @@
+{
+  "label": "original-recheck",
+  "url": "http://127.0.0.1:5174",
+  "browser": "156.0.8078.80",
+  "timestamp": "2026-11-08T23:43:08.166Z",
+  "results": [
+    {
+      "width": 1440,
+      "count": 7,
+      "visibleNodes": 7,
+      "run": 0,
+      "readyMs": 178,
+      "frames": {
+        "median": 16.664999999999964,
+        "p95": 16.670000000000073,
+        "max": 33.335000000000036,
+        "count": 185
+      },
+      "pointerToFrameMs": {
+        "median": 0.2849998474121094,
+        "p95": 0.4200000762939453,
+        "max": 32.019999980926514,
+        "count": 122
+      },
+      "longTasks": 0,
+      "longTaskMs": 0,
+      "heapBytes": 26915539,
+      "cpuSeconds": {
+        "TaskDuration": 0.5778300000000001,
+        "ScriptDuration": 0.351351,
+        "LayoutDuration": 0.00915,
+        "RecalcStyleDuration": 0.009887
+      },
+      "dragCpuSeconds": 0.494141,
+      "panCpuSeconds": 0.08368900000000001,
+      "errors": []
+    },
+    {
+      "width": 1440,
+      "count": 7,
+      "visibleNodes": 7,
+      "run": 1,
+      "readyMs": 140,
+      "frames": {
+        "median": 16.664999999999964,
+        "p95": 16.670000000000073,
+        "max": 16.670000000000073,
+        "count": 186
+      },
+      "pointerToFrameMs": {
+        "median": 0.26999998092651367,
+        "p95": 0.41499996185302734,
+        "max": 28.574999809265137,
+        "count": 122
+      },
+      "longTasks": 0,
+      "longTaskMs": 0,
+      "heapBytes": 26813863,
+      "cpuSeconds": {
+        "TaskDuration": 0.572499,
+        "ScriptDuration": 0.359978,
+        "LayoutDuration": 0.008906,
+        "RecalcStyleDuration": 0.009574
+      },
+      "dragCpuSeconds": 0.49201500000000004,
+      "panCpuSeconds": 0.080484,
+      "errors": []
+    },
+    {
+      "width": 1440,
+      "count": 7,
+      "visibleNodes": 7,
+      "run": 2,
+      "readyMs": 134,
+      "frames": {
+        "median": 16.664999999999964,
+        "p95": 16.670000000000073,
+        "max": 16.670000000000073,
+        "count": 186
+      },
+      "pointerToFrameMs": {
+        "median": 0.28999996185302734,
+        "p95": 0.4699997901916504,
+        "max": 29.21500015258789,
+        "count": 122
+      },
+      "longTasks": 0,
+      "longTaskMs": 0,
+      "heapBytes": 7757380,
+      "cpuSeconds": {
+        "TaskDuration": 0.576415,
+        "ScriptDuration": 0.345896,
+        "LayoutDuration": 0.009111,
+        "RecalcStyleDuration": 0.009812
+      },
+      "dragCpuSeconds": 0.486927,
+      "panCpuSeconds": 0.08948800000000001,
+      "errors": []
+    },
+    {
+      "width": 1440,
+      "count": 107,
+      "visibleNodes": 107,
+      "run": 0,
+      "readyMs": 271,
+      "frames": {
+        "median": 16.664999999999964,
+        "p95": 16.670000000000073,
+        "max": 100,
+        "count": 201
+      },
+      "pointerToFrameMs": {
+        "median": 0.5250000953674316,
+        "p95": 1.2150001525878906,
+        "max": 102.5149998664856,
+        "count": 121
+      },
+      "longTasks": 1,
+      "longTaskMs": 104,
+      "heapBytes": 37353556,
+      "cpuSeconds": {
+        "TaskDuration": 0.64949,
+        "ScriptDuration": 0.223976,
+        "LayoutDuration": 0.000428,
+        "RecalcStyleDuration": 0.001172
+      },
+      "dragCpuSeconds": 0.407915,
+      "panCpuSeconds": 0.24157499999999998,
+      "errors": []
+    },
+    {
+      "width": 1440,
+      "count": 107,
+      "visibleNodes": 107,
+      "run": 1,
+      "readyMs": 284,
+      "frames": {
+        "median": 16.664999999999964,
+        "p95": 16.670000000000073,
+        "max": 16.670000000000073,
+        "count": 187
+      },
+      "pointerToFrameMs": {
+        "median": 0.5,
+        "p95": 1.325000286102295,
+        "max": 29.00499963760376,
+        "count": 121
+      },
+      "longTasks": 0,
+      "longTaskMs": 0,
+      "heapBytes": 18339497,
+      "cpuSeconds": {
+        "TaskDuration": 0.524788,
+        "ScriptDuration": 0.198562,
+        "LayoutDuration": 0.000221,
+        "RecalcStyleDuration": 0.001031
+      },
+      "dragCpuSeconds": 0.26930000000000004,
+      "panCpuSeconds": 0.255488,
+      "errors": []
+    },
+    {
+      "width": 1440,
+      "count": 107,
+      "visibleNodes": 107,
+      "run": 2,
+      "readyMs": 284,
+      "frames": {
+        "median": 16.664999999999964,
+        "p95": 16.670000000000073,
+        "max": 16.670000000000073,
+        "count": 205
+      },
+      "pointerToFrameMs": {
+        "median": 0.49499988555908203,
+        "p95": 1.375,
+        "max": 28.954999923706055,
+        "count": 121
+      },
+      "longTasks": 0,
+      "longTaskMs": 0,
+      "heapBytes": 59753657,
+      "cpuSeconds": {
+        "TaskDuration": 0.572399,
+        "ScriptDuration": 0.209811,
+        "LayoutDuration": 0.000427,
+        "RecalcStyleDuration": 0.001028
+      },
+      "dragCpuSeconds": 0.305398,
+      "panCpuSeconds": 0.267001,
+      "errors": []
+    },
+    {
+      "width": 800,
+      "count": 7,
+      "visibleNodes": 7,
+      "run": 0,
+      "readyMs": 138,
+      "frames": {
+        "median": 16.664999999999964,
+        "p95": 16.670000000000073,
+        "max": 16.670000000000073,
+        "count": 184
+      },
+      "pointerToFrameMs": {
+        "median": 0.2849998474121094,
+        "p95": 0.4200000762939453,
+        "max": 26.460000038146973,
+        "count": 122
+      },
+      "longTasks": 0,
+      "longTaskMs": 0,
+      "heapBytes": 27145576,
+      "cpuSeconds": {
+        "TaskDuration": 0.56667,
+        "ScriptDuration": 0.352119,
+        "LayoutDuration": 0.008843,
+        "RecalcStyleDuration": 0.009728
+      },
+      "dragCpuSeconds": 0.480102,
+      "panCpuSeconds": 0.08656799999999998,
+      "errors": []
+    },
+    {
+      "width": 800,
+      "count": 7,
+      "visibleNodes": 7,
+      "run": 1,
+      "readyMs": 137,
+      "frames": {
+        "median": 16.664999999999964,
+        "p95": 16.670000000000073,
+        "max": 33.33000000000004,
+        "count": 183
+      },
+      "pointerToFrameMs": {
+        "median": 0.2800002098083496,
+        "p95": 0.38500022888183594,
+        "max": 32.045000076293945,
+        "count": 122
+      },
+      "longTasks": 0,
+      "longTaskMs": 0,
+      "heapBytes": 26948812,
+      "cpuSeconds": {
+        "TaskDuration": 0.58486,
+        "ScriptDuration": 0.35954,
+        "LayoutDuration": 0.009563,
+        "RecalcStyleDuration": 0.009901
+      },
+      "dragCpuSeconds": 0.496748,
+      "panCpuSeconds": 0.08811200000000002,
+      "errors": []
+    },
+    {
+      "width": 800,
+      "count": 7,
+      "visibleNodes": 7,
+      "run": 2,
+      "readyMs": 177,
+      "frames": {
+        "median": 16.664999999999964,
+        "p95": 16.670000000000073,
+        "max": 16.670000000000073,
+        "count": 184
+      },
+      "pointerToFrameMs": {
+        "median": 0.2800002098083496,
+        "p95": 0.3900003433227539,
+        "max": 29.40999984741211,
+        "count": 122
+      },
+      "longTasks": 0,
+      "longTaskMs": 0,
+      "heapBytes": 26869072,
+      "cpuSeconds": {
+        "TaskDuration": 0.590905,
+        "ScriptDuration": 0.367668,
+        "LayoutDuration": 0.009324,
+        "RecalcStyleDuration": 0.010328
+      },
+      "dragCpuSeconds": 0.495643,
+      "panCpuSeconds": 0.09526200000000001,
+      "errors": []
+    },
+    {
+      "width": 800,
+      "count": 107,
+      "visibleNodes": 107,
+      "run": 0,
+      "readyMs": 295,
+      "frames": {
+        "median": 16.664999999999964,
+        "p95": 16.670000000000073,
+        "max": 33.33499999999981,
+        "count": 188
+      },
+      "pointerToFrameMs": {
+        "median": 0.4850001335144043,
+        "p95": 1.4149999618530273,
+        "max": 38.02500009536743,
+        "count": 121
+      },
+      "longTasks": 0,
+      "longTaskMs": 0,
+      "heapBytes": 81245133,
+      "cpuSeconds": {
+        "TaskDuration": 0.46358499999999997,
+        "ScriptDuration": 0.218393,
+        "LayoutDuration": 0.000503,
+        "RecalcStyleDuration": 0.001017
+      },
+      "dragCpuSeconds": 0.219868,
+      "panCpuSeconds": 0.24371699999999996,
+      "errors": []
+    },
+    {
+      "width": 800,
+      "count": 107,
+      "visibleNodes": 107,
+      "run": 1,
+      "readyMs": 261,
+      "frames": {
+        "median": 16.664999999999964,
+        "p95": 16.670000000000073,
+        "max": 33.335000000000036,
+        "count": 183
+      },
+      "pointerToFrameMs": {
+        "median": 1.1649999618530273,
+        "p95": 2.0999999046325684,
+        "max": 32.75999975204468,
+        "count": 121
+      },
+      "longTasks": 0,
+      "longTaskMs": 0,
+      "heapBytes": 18301068,
+      "cpuSeconds": {
+        "TaskDuration": 0.5331429999999999,
+        "ScriptDuration": 0.20771,
+        "LayoutDuration": 0.000516,
+        "RecalcStyleDuration": 0.000916
+      },
+      "dragCpuSeconds": 0.29580100000000004,
+      "panCpuSeconds": 0.23734199999999994,
+      "errors": []
+    },
+    {
+      "width": 800,
+      "count": 107,
+      "visibleNodes": 107,
+      "run": 2,
+      "readyMs": 258,
+      "frames": {
+        "median": 16.664999999999964,
+        "p95": 16.670000000000073,
+        "max": 16.670000000000073,
+        "count": 184
+      },
+      "pointerToFrameMs": {
+        "median": 0.554999828338623,
+        "p95": 1.6050000190734863,
+        "max": 28,
+        "count": 121
+      },
+      "longTasks": 0,
+      "longTaskMs": 0,
+      "heapBytes": 54752661,
+      "cpuSeconds": {
+        "TaskDuration": 0.46751400000000004,
+        "ScriptDuration": 0.201829,
+        "LayoutDuration": 0.000341,
+        "RecalcStyleDuration": 0.000906
+      },
+      "dragCpuSeconds": 0.227879,
+      "panCpuSeconds": 0.23963500000000001,
+      "errors": []
+    }
+  ]
+}

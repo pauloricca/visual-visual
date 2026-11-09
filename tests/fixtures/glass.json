@@ -1,0 +1,814 @@
+{
+  "name": "glass",
+  "nodes": [
+    {
+      "id": "add_1",
+      "type": "Add",
+      "params": {
+        "a": 0,
+        "b": 0
+      },
+      "position": {
+        "x": 436.4345343526789,
+        "y": 455.9394813034264
+      }
+    },
+    {
+      "id": "clamp_1",
+      "type": "Clamp",
+      "params": {
+        "max": 1,
+        "min": 0,
+        "value": 0
+      },
+      "position": {
+        "x": 585.6500530439657,
+        "y": 338.3642549686556
+      }
+    },
+    {
+      "id": "constant_1",
+      "type": "Constant",
+      "params": {
+        "value": 25.9644
+      },
+      "position": {
+        "x": -502.3499469560343,
+        "y": 822.3642549686556
+      }
+    },
+    {
+      "id": "constant_2",
+      "type": "Constant",
+      "params": {
+        "value": 0.5593
+      },
+      "position": {
+        "x": 104.65005304396573,
+        "y": 574.3642549686556
+      }
+    },
+    {
+      "id": "delay_1",
+      "type": "Delay",
+      "params": {
+        "frames": 4,
+        "value": 0
+      },
+      "position": {
+        "x": 1168.1017210268885,
+        "y": 53.54688989259961
+      }
+    },
+    {
+      "id": "delay_2",
+      "type": "Delay",
+      "params": {
+        "frames": 25,
+        "value": 0
+      },
+      "position": {
+        "x": -537.388529018621,
+        "y": 594.5816316692378
+      }
+    },
+    {
+      "id": "distance_1",
+      "type": "Distance",
+      "params": {
+        "x1": 0,
+        "x2": 0.5,
+        "y1": 0,
+        "y2": 0.5
+      },
+      "position": {
+        "x": 279.6500530439657,
+        "y": 712.3642549686556
+      }
+    },
+    {
+      "id": "envelope_1",
+      "type": "Envelope",
+      "params": {
+        "attack": 0,
+        "release": 0,
+        "value": 0
+      },
+      "position": {
+        "x": -358.7896701248151,
+        "y": 546.58484315729
+      }
+    },
+    {
+      "id": "expression_1",
+      "type": "Expression",
+      "expression": "1-a",
+      "params": {
+        "a": 0
+      },
+      "position": {
+        "x": 1388.2462842087957,
+        "y": -202.30232460848367
+      },
+      "inputs": [
+        {
+          "name": "a",
+          "defaultValue": 0
+        }
+      ]
+    },
+    {
+      "id": "expression_2",
+      "type": "Expression",
+      "expression": "1-a",
+      "params": {
+        "a": 0
+      },
+      "position": {
+        "x": 1395.294471936098,
+        "y": 104.99866030190827
+      },
+      "inputs": [
+        {
+          "name": "a",
+          "defaultValue": 0
+        }
+      ]
+    },
+    {
+      "id": "expression_3",
+      "type": "Expression",
+      "expression": "1-a",
+      "params": {
+        "a": 0
+      },
+      "position": {
+        "x": 434.1500530439657,
+        "y": 647.3642549686556
+      },
+      "inputs": [
+        {
+          "name": "a",
+          "defaultValue": 0
+        }
+      ]
+    },
+    {
+      "id": "map_1",
+      "type": "Map",
+      "params": {
+        "srcMax": 1,
+        "srcMin": 0,
+        "trgtMax": 0.6956,
+        "trgtMin": 0.384,
+        "value": 0
+      },
+      "position": {
+        "x": 828.8796978265962,
+        "y": 4.040246786035198
+      }
+    },
+    {
+      "id": "multiply_1",
+      "type": "Multiply",
+      "params": {
+        "a": 1,
+        "b": 1
+      },
+      "position": {
+        "x": 279.21901566139206,
+        "y": 433.5147076381972
+      }
+    },
+    {
+      "id": "multiply_2",
+      "type": "Multiply",
+      "params": {
+        "a": 0,
+        "b": 1
+      },
+      "position": {
+        "x": 785.6500530439657,
+        "y": 360.3642549686556
+      }
+    },
+    {
+      "id": "multiply_3",
+      "type": "Multiply",
+      "params": {
+        "a": 0,
+        "b": 1
+      },
+      "position": {
+        "x": -283.38852901862106,
+        "y": 751.5816316692378
+      }
+    },
+    {
+      "id": "noise_1",
+      "type": "Noise",
+      "params": {
+        "octaves": 4,
+        "scale": 4.3572,
+        "seed": 0,
+        "x": 0,
+        "y": 0
+      },
+      "position": {
+        "x": -83.61416327446966,
+        "y": -25.845577010035655
+      }
+    },
+    {
+      "id": "noise_2",
+      "type": "Noise",
+      "params": {
+        "octaves": 4,
+        "scale": 6.3164,
+        "seed": 0,
+        "x": 0,
+        "y": 0
+      },
+      "position": {
+        "x": -85.02380081993022,
+        "y": 337.84090971877674
+      }
+    },
+    {
+      "id": "noise_3",
+      "type": "Noise",
+      "params": {
+        "octaves": 4,
+        "scale": 16,
+        "seed": 0,
+        "x": 0,
+        "y": 0
+      },
+      "position": {
+        "x": 228.02413572704052,
+        "y": 141.97128070847856
+      }
+    },
+    {
+      "id": "output_1",
+      "type": "Output",
+      "params": {
+        "b": 0,
+        "g": 0,
+        "r": 0
+      },
+      "position": {
+        "x": 1903.4024547569484,
+        "y": -60.93032008916725
+      }
+    },
+    {
+      "id": "pow_1",
+      "type": "Pow",
+      "params": {
+        "a": 1,
+        "b": 2.5884
+      },
+      "position": {
+        "x": -123.0847566786145,
+        "y": 767.5481696537175
+      }
+    },
+    {
+      "id": "scope_1",
+      "type": "Scope",
+      "params": {
+        "value": 0
+      },
+      "position": {
+        "x": -703.3499469560343,
+        "y": 418.3642549686556
+      }
+    },
+    {
+      "id": "scope_2",
+      "type": "Scope",
+      "params": {
+        "value": 0
+      },
+      "position": {
+        "x": 52.65005304396573,
+        "y": 762.3642549686556
+      }
+    },
+    {
+      "id": "scope_3",
+      "type": "Scope",
+      "params": {
+        "value": 0
+      },
+      "position": {
+        "x": 1016.6500530439657,
+        "y": 438.3642549686556
+      }
+    },
+    {
+      "id": "sin_1",
+      "type": "Sin",
+      "params": {
+        "value": 0
+      },
+      "position": {
+        "x": -335.5176203663094,
+        "y": -36.89609838296765
+      }
+    },
+    {
+      "id": "sin_2",
+      "type": "Sin",
+      "params": {
+        "value": 0
+      },
+      "position": {
+        "x": -336.92725791176997,
+        "y": 326.79038834584475
+      }
+    },
+    {
+      "id": "smoothstep_1",
+      "type": "Smoothstep",
+      "params": {
+        "edge0": 0.384,
+        "edge1": 0.6956,
+        "value": 0
+      },
+      "position": {
+        "x": 1004.1861960715283,
+        "y": -159.3422075534799
+      }
+    },
+    {
+      "id": "smoothstep_2",
+      "type": "Smoothstep",
+      "params": {
+        "edge0": 0.5264,
+        "edge1": 1,
+        "value": 0
+      },
+      "position": {
+        "x": 744.4000530439657,
+        "y": 614.8642549686556
+      }
+    },
+    {
+      "id": "system_1",
+      "type": "System",
+      "params": {},
+      "position": {
+        "x": -747.987387912427,
+        "y": 10.578420181185564
+      }
+    }
+  ],
+  "links": [
+    {
+      "from": {
+        "node": "multiply_1",
+        "port": "value"
+      },
+      "to": {
+        "node": "add_1",
+        "port": "a"
+      },
+      "weight": 1,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "constant_2",
+        "port": "value"
+      },
+      "to": {
+        "node": "add_1",
+        "port": "b"
+      },
+      "weight": 1,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "add_1",
+        "port": "value"
+      },
+      "to": {
+        "node": "clamp_1",
+        "port": "value"
+      },
+      "weight": 1,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "smoothstep_1",
+        "port": "value"
+      },
+      "to": {
+        "node": "delay_1",
+        "port": "value"
+      },
+      "weight": 1,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "system_1",
+        "port": "mic"
+      },
+      "to": {
+        "node": "delay_2",
+        "port": "value"
+      },
+      "weight": 1,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "system_1",
+        "port": "x"
+      },
+      "to": {
+        "node": "distance_1",
+        "port": "x1"
+      },
+      "weight": 1,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "system_1",
+        "port": "y"
+      },
+      "to": {
+        "node": "distance_1",
+        "port": "y1"
+      },
+      "weight": 1,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "delay_2",
+        "port": "value"
+      },
+      "to": {
+        "node": "envelope_1",
+        "port": "value"
+      },
+      "weight": 1,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "smoothstep_1",
+        "port": "value"
+      },
+      "to": {
+        "node": "expression_1",
+        "port": "a"
+      },
+      "weight": 1,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "delay_1",
+        "port": "value"
+      },
+      "to": {
+        "node": "expression_2",
+        "port": "a"
+      },
+      "weight": 1,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "distance_1",
+        "port": "value"
+      },
+      "to": {
+        "node": "expression_3",
+        "port": "a"
+      },
+      "weight": 1,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "multiply_2",
+        "port": "value"
+      },
+      "to": {
+        "node": "map_1",
+        "port": "value"
+      },
+      "weight": 1,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "pow_1",
+        "port": "value"
+      },
+      "to": {
+        "node": "multiply_1",
+        "port": "a"
+      },
+      "weight": 1,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "clamp_1",
+        "port": "value"
+      },
+      "to": {
+        "node": "multiply_2",
+        "port": "a"
+      },
+      "weight": 1,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "smoothstep_2",
+        "port": "value"
+      },
+      "to": {
+        "node": "multiply_2",
+        "port": "b"
+      },
+      "weight": 1,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "envelope_1",
+        "port": "value"
+      },
+      "to": {
+        "node": "multiply_3",
+        "port": "a"
+      },
+      "weight": 1,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "constant_1",
+        "port": "value"
+      },
+      "to": {
+        "node": "multiply_3",
+        "port": "b"
+      },
+      "weight": 1,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "sin_1",
+        "port": "value"
+      },
+      "to": {
+        "node": "noise_1",
+        "port": "x"
+      },
+      "weight": 1,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "system_1",
+        "port": "time"
+      },
+      "to": {
+        "node": "noise_1",
+        "port": "y"
+      },
+      "weight": 0.0173,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "system_1",
+        "port": "time"
+      },
+      "to": {
+        "node": "noise_2",
+        "port": "x"
+      },
+      "weight": 0.0139,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "sin_2",
+        "port": "value"
+      },
+      "to": {
+        "node": "noise_2",
+        "port": "y"
+      },
+      "weight": 1,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "noise_1",
+        "port": "value"
+      },
+      "to": {
+        "node": "noise_3",
+        "port": "x"
+      },
+      "weight": 1,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "noise_2",
+        "port": "value"
+      },
+      "to": {
+        "node": "noise_3",
+        "port": "y"
+      },
+      "weight": 1,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "system_1",
+        "port": "time"
+      },
+      "to": {
+        "node": "noise_3",
+        "port": "y"
+      },
+      "weight": 0.005,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "expression_2",
+        "port": "value"
+      },
+      "to": {
+        "node": "output_1",
+        "port": "b"
+      },
+      "weight": 1,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "expression_2",
+        "port": "value"
+      },
+      "to": {
+        "node": "output_1",
+        "port": "g"
+      },
+      "weight": 1,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "expression_1",
+        "port": "value"
+      },
+      "to": {
+        "node": "output_1",
+        "port": "r"
+      },
+      "weight": 1,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "expression_2",
+        "port": "value"
+      },
+      "to": {
+        "node": "output_1",
+        "port": "r"
+      },
+      "weight": 1,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "multiply_3",
+        "port": "value"
+      },
+      "to": {
+        "node": "pow_1",
+        "port": "a"
+      },
+      "weight": 1,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "system_1",
+        "port": "mic"
+      },
+      "to": {
+        "node": "scope_1",
+        "port": "value"
+      },
+      "weight": 1,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "pow_1",
+        "port": "value"
+      },
+      "to": {
+        "node": "scope_2",
+        "port": "value"
+      },
+      "weight": 1,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "smoothstep_2",
+        "port": "value"
+      },
+      "to": {
+        "node": "scope_3",
+        "port": "value"
+      },
+      "weight": 1,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "system_1",
+        "port": "x"
+      },
+      "to": {
+        "node": "sin_1",
+        "port": "value"
+      },
+      "weight": 9.6203,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "system_1",
+        "port": "y"
+      },
+      "to": {
+        "node": "sin_2",
+        "port": "value"
+      },
+      "weight": 0.7103,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "map_1",
+        "port": "value"
+      },
+      "to": {
+        "node": "smoothstep_1",
+        "port": "edge1"
+      },
+      "weight": 1,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "noise_3",
+        "port": "value"
+      },
+      "to": {
+        "node": "smoothstep_1",
+        "port": "value"
+      },
+      "weight": 1.1514,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "expression_3",
+        "port": "value"
+      },
+      "to": {
+        "node": "smoothstep_2",
+        "port": "value"
+      },
+      "weight": 1,
+      "mode": "set"
+    }
+  ]
+}

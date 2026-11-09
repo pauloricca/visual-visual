@@ -1,0 +1,14 @@
+{
+  "package": "@pauloricca/spagbol",
+  "version": "0.1.1",
+  "registryTarball": "https://registry.npmjs.org/@pauloricca/spagbol/-/spagbol-0.1.1.tgz",
+  "integrity": "sha512-XD2PJ+4EFWkB5tsgSqJL1Hhqc2tcBIMmo8hPB6LzaCEpH01GYusvooRbeACSsbvxCPWEYT6EhXcjSGe/onc6sg==",
+  "sourceCommit": "43e613cb685533c6812f97cc22b35c9ea9d1ed44",
+  "builtFilesMatched": 123,
+  "cleanInstallVerified": true,
+  "compatibilityTestsPassed": 109,
+  "typecheckPassed": true,
+  "productionBuildPassed": true,
+  "dragBrowserChecksPassed": true,
+  "uiSmokeChecksPassed": true
+}

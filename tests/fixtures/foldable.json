@@ -1,0 +1,761 @@
+{
+  "name": "foldable",
+  "nodes": [
+    {
+      "id": "camera_1",
+      "type": "Camera",
+      "params": {
+        "x": 0,
+        "y": 0
+      },
+      "position": {
+        "x": -2053.5303495269154,
+        "y": -851.084174183864
+      }
+    },
+    {
+      "id": "constant_1",
+      "type": "Constant",
+      "params": {
+        "value": 0.1311
+      },
+      "position": {
+        "x": -2715.1659139311373,
+        "y": -614.2788212383754
+      }
+    },
+    {
+      "id": "delay_1",
+      "type": "Delay",
+      "params": {
+        "frames": 10,
+        "value": 0
+      },
+      "position": {
+        "x": -1017.2421748070254,
+        "y": -518.9235220876196
+      }
+    },
+    {
+      "id": "envelope_1",
+      "type": "Envelope",
+      "params": {
+        "attack": 12,
+        "release": 32,
+        "value": 0
+      },
+      "position": {
+        "x": -2935.906321395701,
+        "y": -784.7139918152608
+      }
+    },
+    {
+      "id": "envelope_2",
+      "type": "Envelope",
+      "params": {
+        "attack": 5,
+        "release": 5,
+        "value": 0
+      },
+      "position": {
+        "x": -1835.313549297046,
+        "y": -913.5370670365168
+      }
+    },
+    {
+      "id": "expression_1",
+      "type": "Expression",
+      "expression": "sin(cosh(c))",
+      "params": {
+        "c": 0
+      },
+      "position": {
+        "x": -1940.1935140474764,
+        "y": -677.035918054037
+      },
+      "inputs": [
+        {
+          "name": "c",
+          "defaultValue": 0
+        }
+      ]
+    },
+    {
+      "id": "juliaorbittrap_1",
+      "type": "juliaOrbitTrap",
+      "params": {
+        "bailout": 4,
+        "cx": -0.5762,
+        "cy": 0.0524,
+        "iterations": 32,
+        "x": 0,
+        "y": 0
+      },
+      "position": {
+        "x": -1335.283026989478,
+        "y": -452.0778067873395
+      }
+    },
+    {
+      "id": "multiply_1",
+      "type": "Multiply",
+      "params": {
+        "a": 0,
+        "b": 1
+      },
+      "position": {
+        "x": -1631.7911898986974,
+        "y": -561.5261179521937
+      }
+    },
+    {
+      "id": "multiply_2",
+      "type": "Multiply",
+      "params": {
+        "a": 0,
+        "b": 1
+      },
+      "position": {
+        "x": -814.8073017556147,
+        "y": -634.9404692109462
+      }
+    },
+    {
+      "id": "multiply_3",
+      "type": "Multiply",
+      "params": {
+        "a": 0,
+        "b": 1.5
+      },
+      "position": {
+        "x": -801.8656067072436,
+        "y": -259.1878563640512
+      }
+    },
+    {
+      "id": "multiply_4",
+      "type": "Multiply",
+      "params": {
+        "a": 0,
+        "b": 0
+      },
+      "position": {
+        "x": -2490.4459896080875,
+        "y": -734.8890267093998
+      }
+    },
+    {
+      "id": "multiply_5",
+      "type": "Multiply",
+      "params": {
+        "a": 0,
+        "b": 0
+      },
+      "position": {
+        "x": -2486.6783781825616,
+        "y": -606.7902382415111
+      }
+    },
+    {
+      "id": "multiply_6",
+      "type": "Multiply",
+      "params": {
+        "a": 0,
+        "b": 1
+      },
+      "position": {
+        "x": -2304.1183741930727,
+        "y": -1005.5745967988196
+      }
+    },
+    {
+      "id": "noise_1",
+      "type": "Noise",
+      "params": {
+        "octaves": 4,
+        "scale": 30,
+        "seed": 0,
+        "x": 0,
+        "y": 0
+      },
+      "position": {
+        "x": -1722.1161257907615,
+        "y": -384.29542273921606
+      }
+    },
+    {
+      "id": "noise_2",
+      "type": "Noise",
+      "params": {
+        "octaves": 4,
+        "scale": 0.8497,
+        "seed": 0,
+        "x": 0,
+        "y": 0
+      },
+      "position": {
+        "x": -2264.850082225205,
+        "y": -646.1169015780167
+      }
+    },
+    {
+      "id": "output_1",
+      "type": "Output",
+      "params": {
+        "b": 0,
+        "g": 0,
+        "r": 0
+      },
+      "position": {
+        "x": -586.4890386074618,
+        "y": -464.1242664553728
+      }
+    },
+    {
+      "id": "sin_1",
+      "type": "Sin",
+      "params": {
+        "value": 0
+      },
+      "position": {
+        "x": -2047.7641433323995,
+        "y": -160.97353035992526
+      }
+    },
+    {
+      "id": "sin_2",
+      "type": "Sin",
+      "params": {
+        "value": 0
+      },
+      "position": {
+        "x": -1893.968879283697,
+        "y": -435.4577082923701
+      }
+    },
+    {
+      "id": "sin_3",
+      "type": "Sin",
+      "params": {
+        "value": 0
+      },
+      "position": {
+        "x": -1348.1088501571458,
+        "y": -657.8680569546541
+      }
+    },
+    {
+      "id": "sin_4",
+      "type": "Sin",
+      "params": {
+        "value": 0
+      },
+      "position": {
+        "x": -1386.2333836441182,
+        "y": -64.28974142841113
+      }
+    },
+    {
+      "id": "sin_6",
+      "type": "Sin",
+      "params": {
+        "value": 0
+      },
+      "position": {
+        "x": -2721.4174827819725,
+        "y": -981.6426037018681
+      }
+    },
+    {
+      "id": "system_1",
+      "type": "System",
+      "params": {},
+      "position": {
+        "x": -3186.1033833071237,
+        "y": -59.92301202890482
+      }
+    }
+  ],
+  "links": [
+    {
+      "from": {
+        "node": "noise_2",
+        "port": "value"
+      },
+      "to": {
+        "node": "camera_1",
+        "port": "x"
+      },
+      "weight": 1,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "multiply_6",
+        "port": "value"
+      },
+      "to": {
+        "node": "camera_1",
+        "port": "y"
+      },
+      "weight": 1,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "envelope_1",
+        "port": "value"
+      },
+      "to": {
+        "node": "constant_1",
+        "port": "value"
+      },
+      "weight": 0.3126,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "delay_1",
+        "port": "value"
+      },
+      "to": {
+        "node": "delay_1",
+        "port": "value"
+      },
+      "weight": 1,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "juliaorbittrap_1",
+        "port": "value"
+      },
+      "to": {
+        "node": "delay_1",
+        "port": "value"
+      },
+      "weight": 1,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "system_1",
+        "port": "mic"
+      },
+      "to": {
+        "node": "envelope_1",
+        "port": "value"
+      },
+      "weight": 1,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "camera_1",
+        "port": "r"
+      },
+      "to": {
+        "node": "envelope_2",
+        "port": "value"
+      },
+      "weight": 1,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "noise_2",
+        "port": "value"
+      },
+      "to": {
+        "node": "expression_1",
+        "port": "c"
+      },
+      "weight": 1,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "multiply_1",
+        "port": "value"
+      },
+      "to": {
+        "node": "juliaorbittrap_1",
+        "port": "x"
+      },
+      "weight": 1,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "multiply_4",
+        "port": "value"
+      },
+      "to": {
+        "node": "juliaorbittrap_1",
+        "port": "x"
+      },
+      "weight": 1,
+      "mode": "add"
+    },
+    {
+      "from": {
+        "node": "multiply_5",
+        "port": "value"
+      },
+      "to": {
+        "node": "juliaorbittrap_1",
+        "port": "y"
+      },
+      "weight": 1,
+      "mode": "add"
+    },
+    {
+      "from": {
+        "node": "noise_1",
+        "port": "value"
+      },
+      "to": {
+        "node": "juliaorbittrap_1",
+        "port": "y"
+      },
+      "weight": 1,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "expression_1",
+        "port": "value"
+      },
+      "to": {
+        "node": "multiply_1",
+        "port": "a"
+      },
+      "weight": 1,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "sin_2",
+        "port": "value"
+      },
+      "to": {
+        "node": "multiply_1",
+        "port": "b"
+      },
+      "weight": 0.1,
+      "mode": "add"
+    },
+    {
+      "from": {
+        "node": "delay_1",
+        "port": "value"
+      },
+      "to": {
+        "node": "multiply_2",
+        "port": "a"
+      },
+      "weight": 1,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "sin_3",
+        "port": "value"
+      },
+      "to": {
+        "node": "multiply_2",
+        "port": "b"
+      },
+      "weight": 1,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "juliaorbittrap_1",
+        "port": "value"
+      },
+      "to": {
+        "node": "multiply_3",
+        "port": "a"
+      },
+      "weight": 1,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "sin_4",
+        "port": "value"
+      },
+      "to": {
+        "node": "multiply_3",
+        "port": "b"
+      },
+      "weight": 2,
+      "mode": "add"
+    },
+    {
+      "from": {
+        "node": "system_1",
+        "port": "x"
+      },
+      "to": {
+        "node": "multiply_4",
+        "port": "a"
+      },
+      "weight": 1,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "constant_1",
+        "port": "value"
+      },
+      "to": {
+        "node": "multiply_4",
+        "port": "b"
+      },
+      "weight": 1,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "system_1",
+        "port": "y"
+      },
+      "to": {
+        "node": "multiply_5",
+        "port": "a"
+      },
+      "weight": 1,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "constant_1",
+        "port": "value"
+      },
+      "to": {
+        "node": "multiply_5",
+        "port": "b"
+      },
+      "weight": 1,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "system_1",
+        "port": "y"
+      },
+      "to": {
+        "node": "multiply_6",
+        "port": "a"
+      },
+      "weight": 1,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "sin_6",
+        "port": "value"
+      },
+      "to": {
+        "node": "multiply_6",
+        "port": "b"
+      },
+      "weight": 1,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "sin_1",
+        "port": "value"
+      },
+      "to": {
+        "node": "noise_1",
+        "port": "scale"
+      },
+      "weight": 25,
+      "mode": "add"
+    },
+    {
+      "from": {
+        "node": "envelope_2",
+        "port": "value"
+      },
+      "to": {
+        "node": "noise_1",
+        "port": "x"
+      },
+      "weight": 0.1358,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "system_1",
+        "port": "y"
+      },
+      "to": {
+        "node": "noise_1",
+        "port": "y"
+      },
+      "weight": 0.1,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "system_1",
+        "port": "x"
+      },
+      "to": {
+        "node": "noise_2",
+        "port": "x"
+      },
+      "weight": 1,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "system_1",
+        "port": "time"
+      },
+      "to": {
+        "node": "noise_2",
+        "port": "y"
+      },
+      "weight": 0.1,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "juliaorbittrap_1",
+        "port": "escape"
+      },
+      "to": {
+        "node": "output_1",
+        "port": "b"
+      },
+      "weight": 2.168,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "juliaorbittrap_1",
+        "port": "outX"
+      },
+      "to": {
+        "node": "output_1",
+        "port": "b"
+      },
+      "weight": 0.0435,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "multiply_3",
+        "port": "value"
+      },
+      "to": {
+        "node": "output_1",
+        "port": "b"
+      },
+      "weight": 1,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "juliaorbittrap_1",
+        "port": "escape"
+      },
+      "to": {
+        "node": "output_1",
+        "port": "g"
+      },
+      "weight": 1.4229,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "juliaorbittrap_1",
+        "port": "outY"
+      },
+      "to": {
+        "node": "output_1",
+        "port": "r"
+      },
+      "weight": 0.2761,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "multiply_2",
+        "port": "value"
+      },
+      "to": {
+        "node": "output_1",
+        "port": "r"
+      },
+      "weight": 1.2615,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "system_1",
+        "port": "time"
+      },
+      "to": {
+        "node": "sin_1",
+        "port": "value"
+      },
+      "weight": 0.02,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "system_1",
+        "port": "time"
+      },
+      "to": {
+        "node": "sin_2",
+        "port": "value"
+      },
+      "weight": 0.1,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "system_1",
+        "port": "time"
+      },
+      "to": {
+        "node": "sin_3",
+        "port": "value"
+      },
+      "weight": 0.07,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "system_1",
+        "port": "time"
+      },
+      "to": {
+        "node": "sin_4",
+        "port": "value"
+      },
+      "weight": 0.5,
+      "mode": "set"
+    },
+    {
+      "from": {
+        "node": "system_1",
+        "port": "time"
+      },
+      "to": {
+        "node": "sin_6",
+        "port": "value"
+      },
+      "weight": 0.01,
+      "mode": "set"
+    }
+  ]
+}

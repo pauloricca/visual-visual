@@ -64,3 +64,9 @@ Patch JSON contains:
 - `links`: `{ from: { node, port }, to: { node, port }, weight?, mode? }`
 
 All ports are floats. `params` store default values for unconnected inputs and for inputs with only `add`/`multiply` links. Link `mode` defaults to `set`; modes apply in order as averaged `set`, summed `add`, then multiplied `multiply`.
+
+## Shared graph UI
+
+The editor now consumes `@pauloricca/spagbol@0.1.3`. Visual Visual owns the shader node catalogue and patch adapter; Spagbol owns graph presentation and editing. Existing patch files and v1 browser state remain supported. New browser sessions persist the shared document under `visual-visual.editor-state.v2`, leaving v1 data intact.
+
+Run `npm test` for patch/compiler compatibility checks. The before/after screenshots, interaction measurements, known package gaps and reproduction commands are in [the migration report](benchmarks/REPORT.md). Spagbol 0.1.1 includes the verified node-drag performance fix. The dependency and lockfile use the published npm package, and a clean install matches the tested build. See the report for measurements and remaining UI differences.

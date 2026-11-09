@@ -1,0 +1,39 @@
+{
+  "label": "spagbol-native-preview-check",
+  "url": "http://127.0.0.1:5175",
+  "browser": "156.0.8078.80",
+  "timestamp": "2026-11-08T23:38:26.438Z",
+  "results": [
+    {
+      "width": 1440,
+      "count": 107,
+      "visibleNodes": 107,
+      "run": 0,
+      "readyMs": 437,
+      "frames": {
+        "median": 16.664999999999964,
+        "p95": 16.670000000000073,
+        "max": 50,
+        "count": 184
+      },
+      "pointerToFrameMs": {
+        "median": 0.22999954223632812,
+        "p95": 0.630000114440918,
+        "max": 52.109999656677246,
+        "count": 122
+      },
+      "longTasks": 1,
+      "longTaskMs": 58,
+      "heapBytes": 15586725,
+      "cpuSeconds": {
+        "TaskDuration": 0.47112,
+        "ScriptDuration": 0.155836,
+        "LayoutDuration": 0.000837,
+        "RecalcStyleDuration": 0.006291
+      },
+      "dragCpuSeconds": 0.298631,
+      "panCpuSeconds": 0.172489,
+      "errors": []
+    }
+  ]
+}

@@ -1,0 +1,42 @@
+{
+  "label": "after",
+  "browser": "156.0.8078.80",
+  "results": [
+    {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "readyMs": 375,
+      "frameMedianMs": 16.664999999999964,
+      "frameP95Ms": 16.670000000000073,
+      "frames": 120,
+      "longTasks": 0,
+      "longTaskMs": 0,
+      "nodes": 7,
+      "edges": 8,
+      "heapBytes": 14781410,
+      "dragMedianMs": 231,
+      "pan20EventsMs": 1332,
+      "errors": []
+    },
+    {
+      "viewport": {
+        "width": 800,
+        "height": 900
+      },
+      "readyMs": 262,
+      "frameMedianMs": 16.664999999999964,
+      "frameP95Ms": 16.670000000000073,
+      "frames": 120,
+      "longTasks": 0,
+      "longTaskMs": 0,
+      "nodes": 7,
+      "edges": 8,
+      "heapBytes": 15039287,
+      "dragMedianMs": 222,
+      "pan20EventsMs": 1336,
+      "errors": []
+    }
+  ]
+}
