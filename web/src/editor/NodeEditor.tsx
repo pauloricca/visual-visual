@@ -1,3 +1,7 @@
+import { normalizeExecutionAreas } from "../scene/executionAreas";
+import { emptyScene, sceneNodes } from "../scene/catalogue";
+import { sceneViews } from "../scene/SceneViews";
+import { parseProject, type SceneProject } from "../scene/project";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   GraphEditor,
@@ -12,8 +16,6 @@ import type { ReactFlowInstance, Viewport } from "@xyflow/react";
 import { compilePatchToGlsl } from "../graph/glsl";
 import { validatePatch } from "../graph/validate";
 import { patchToJson } from "../graph/serialize";
-import { parsePatchJson } from "../graph/parse";
-import { demoPatch } from "../graph/demoPatch";
 import type { Patch } from "../graph/types";
 import { ExportPanel } from "../export/ExportPanel";
 import {
@@ -46,7 +48,7 @@ import {
 import { useMidi, applyMidiValues, MidiValuesContext } from "./useMidi";
 
 const shaderCanvasFeatures = Object.freeze({
-  compact: false,
+  compact: true,
   areas: false,
   panels: false,
   nestedGraphs: true,
@@ -84,14 +86,41 @@ function candidates(
 }
 export function NodeEditor() {
   const [initial] = useState(readEditorState);
+  const [projectInitial] = useState<SceneProject | null>(() => {
+    try {
+      const raw = localStorage.getItem("visual-visual.project.v2");
+      return raw ? parseProject(raw) : null;
+    } catch {
+      return null;
+    }
+  });
+  const [sceneRevision, setSceneRevision] = useState(0);
+  const [activeTab, setActiveTab] = useState<"scene" | "effects">(
+    projectInitial?.activeTab ?? (initial ? "effects" : "scene"),
+  );
+  const [sceneEditor] = useState(
+    () =>
+      new GraphEditor({
+        nodes: sceneNodes,
+        document: (() => { const graph = structuredClone(projectInitial?.scene ?? emptyScene()); normalizeExecutionAreas(graph); return graph; })(),
+        normalizeDocument: normalizeExecutionAreas,
+        policy: {
+          modes: ["set", "add", "multiply", "bend"],
+          linkProperties: ["weight"],
+          allowSelfLinks: true,
+        },
+        historyLimit: 100,
+      }),
+  );
+  const sceneSnapshot = useEditorSnapshot(sceneEditor);
   const runtimeListener = useRef<((document: GraphDocument) => void) | null>(
     null,
   );
-  const [editor] = useState(
+  const [effectsEditor] = useState(
     () =>
       new GraphEditor({
         nodes: shaderNodes,
-        document: initial?.document ?? patchToGraph(demoPatch),
+        document: projectInitial?.effects ?? initial?.document ?? emptyScene(),
         policy: {
           modes: ["set", "add", "multiply"],
           linkProperties: [],
@@ -106,18 +135,19 @@ export function NodeEditor() {
         onPreview: (event) => {
           if (!event || event.kinds.some((kind) => kind !== "layout"))
             runtimeListener.current?.(
-              event?.document ?? editor.getSnapshot().document,
+              event?.document ?? effectsEditor.getSnapshot().document,
             );
         },
       }),
   );
+  const editor = activeTab === "scene" ? sceneEditor : effectsEditor;
   const snapshot = useEditorSnapshot(editor);
   const [runtimeDocument, setRuntimeDocument] = useState(
-    editor.getSnapshot().document,
+    effectsEditor.getSnapshot().document,
   );
   runtimeListener.current = setRuntimeDocument;
   const [patchName, setPatchName] = useState(
-    initial?.ui?.patchName ?? "untitled-patch",
+    projectInitial?.name ?? initial?.ui?.patchName ?? "untitled-patch",
   );
   const [sidePanelOpen, setSidePanelOpen] = useState(
     initial?.ui?.sidePanelOpen ?? true,
@@ -139,10 +169,13 @@ export function NodeEditor() {
     typeof candidates
   > | null>(null);
   const [flow, setFlow] = useState<ReactFlowInstance | null>(null);
+  const viewports = useRef<SceneProject["viewports"]>(
+    projectInitial?.viewports ?? { effects: initial?.ui?.viewport },
+  );
   const preview = useRef<WebGLPreviewHandle>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const viewport = useRef<Viewport>(
-    initial?.ui?.viewport ?? { x: 0, y: 0, zoom: 1 },
+    viewports.current?.[activeTab] ?? { x: 0, y: 0, zoom: 1 },
   );
   const [appId] = useState(ensureRenderSyncAppIdInUrl);
   const local = canUseLocalPatchStorage();
@@ -152,7 +185,14 @@ export function NodeEditor() {
     () => applyMidiValues(graphToPatch(runtimeDocument), midi),
     [runtimeDocument, midi],
   );
-  const validation = useMemo(() => validatePatch(patch), [patch]);
+  const hasEffectsOutput = patch.nodes.some((node) => node.type === "Output");
+  const validation = useMemo(
+    () =>
+      hasEffectsOutput
+        ? validatePatch(patch)
+        : { ok: true, errors: [], warnings: [] },
+    [patch, hasEffectsOutput],
+  );
   const compile = useMemo(
     () => compilePatchToGlsl(patch, "webgl2", { enableScopes: !uiHidden }),
     [patch, uiHidden],
@@ -165,17 +205,53 @@ export function NodeEditor() {
     () => patchToJson({ ...patch, name: patchName }),
     [patch, patchName],
   );
+  const effectsBypass =
+    runtimeDocument.data?.enabled === false ||
+    !runtimeDocument.nodes.some((node) => node.kind === "Output");
   const bundle = useMemo(
-    () =>
-      renderBundleFromCompileResult(
+    () => ({
+      ...(renderBundleFromCompileResult(
         projector,
         patchName,
-        renderBundleRevision(json),
-      ),
-    [projector, patchName, json],
+        renderBundleRevision(
+          json +
+            JSON.stringify(sceneSnapshot.document) +
+            effectsBypass +
+            sceneRevision,
+        ),
+      ) ?? {
+        version: 1 as const,
+        revision: renderBundleRevision(
+          json +
+            JSON.stringify(sceneSnapshot.document) +
+            effectsBypass +
+            sceneRevision,
+        ),
+        patchName,
+        shaderCode: "",
+        shaderArgs: [],
+        feedbackTextureCount: 0,
+        bufferSlots: [],
+        delaySlots: [],
+        envelopeSlots: [],
+        media: { useMic: false, useCamera: false },
+      }),
+      sceneDocument: sceneSnapshot.document,
+      sceneRevision,
+      effectsBypass,
+    }),
+    [
+      projector,
+      patchName,
+      json,
+      sceneSnapshot.document,
+      sceneRevision,
+      effectsBypass,
+    ],
   );
   useRenderSyncPublisher(bundle, appId);
   const presentation = useMemo(() => {
+    if (activeTab === "scene") return {};
     const graph = graphAt(runtimeDocument, snapshot.path);
     const nestedPatch = graphToPatch(graph);
     const prefix = snapshot.path.length ? `${snapshot.path.join("__")}__` : "";
@@ -193,6 +269,7 @@ export function NodeEditor() {
     );
   }, [
     runtimeDocument,
+    activeTab,
     snapshot.path,
     compile.feedbackLinkIds,
     compile.delayFrameLinkIds,
@@ -208,19 +285,41 @@ export function NodeEditor() {
       };
       try {
         localStorage.setItem(
+          "visual-visual.project.v2",
+          JSON.stringify({
+            format: "visual-visual",
+            version: 2,
+            name: patchName,
+            scene: sceneEditor.getSnapshot().document,
+            effects: effectsEditor.getSnapshot().document,
+            activeTab,
+            viewports: viewports.current,
+          } satisfies SceneProject),
+        );
+        localStorage.setItem(
           STORAGE_KEY,
-          JSON.stringify({ document: editor.getSnapshot().document, ui }),
+          JSON.stringify({
+            document: effectsEditor.getSnapshot().document,
+            ui,
+          }),
         );
       } catch {
         /* Optional browser storage. */
       }
     },
-    [editor, patchName, sidePanelOpen, visualizationVisible],
+    [
+      effectsEditor,
+      sceneEditor,
+      activeTab,
+      patchName,
+      sidePanelOpen,
+      visualizationVisible,
+    ],
   );
   useEffect(() => {
     const id = setTimeout(persist, 120);
     return () => clearTimeout(id);
-  }, [persist, snapshot.document]);
+  }, [persist, snapshot.document, sceneSnapshot.document, runtimeDocument]);
   useEffect(() => {
     const save = () => persist();
     window.addEventListener("pagehide", save);
@@ -232,10 +331,11 @@ export function NodeEditor() {
   const viewportChanged = useCallback(
     (value: Viewport) => {
       viewport.current = value;
+      viewports.current = { ...viewports.current, [activeTab]: value };
       clearTimeout(viewportTimer.current);
       viewportTimer.current = setTimeout(() => persist(), 120);
     },
-    [persist],
+    [persist, activeTab],
   );
   useEffect(() => () => clearTimeout(viewportTimer.current), []);
   const fit = useCallback(() => {
@@ -244,20 +344,11 @@ export function NodeEditor() {
     });
   }, [flow]);
   useEffect(() => {
-    if (flow && !initial?.ui?.viewport) {
+    if (flow && !viewports.current?.[activeTab]) {
       const id = setTimeout(fit, 100);
       return () => clearTimeout(id);
     }
-  }, [flow, initial, fit]);
-  const loadPatch = (next: Patch) => {
-    editor.setMode("edit");
-    editor.replace(patchToGraph(next));
-    setPatchName(next.name ?? "untitled-patch");
-    setImportError(null);
-    setLibrary(null);
-    setSubpatches(null);
-    fit();
-  };
+  }, [flow, activeTab, fit]);
   const act = (fn: () => void | Promise<void>) => async () => {
     try {
       await fn();
@@ -267,10 +358,19 @@ export function NodeEditor() {
     }
   };
   const save = act(async () => {
-    const exported = patchToJson({
-      ...applyMidiValues(graphToPatch(editor.getSnapshot().document), midi),
-      name: patchName,
-    });
+    const exported = JSON.stringify(
+      {
+        format: "visual-visual",
+        version: 2,
+        name: patchName,
+        scene: sceneEditor.getSnapshot().document,
+        effects: effectsEditor.getSnapshot().document,
+        activeTab,
+        viewports: viewports.current,
+      } satisfies SceneProject,
+      null,
+      2,
+    );
     if (local) await saveLocalPatchVersion(patchName, exported);
     else download(`${patchName.trim() || "untitled-patch"}.json`, exported);
     setSaved(true);
@@ -302,13 +402,34 @@ export function NodeEditor() {
     setSubpatches(choices);
     setLibrary(null);
   };
-  const loadSelected = act(async () => {
-    const next = parsePatchJson(
-      await fetchLocalPatchVersion(selectedPatch, selectedVersion),
-    );
-    if (importing) chooseImported(next);
-    else loadPatch(next);
-  });
+  const loadProject = (source: string) => {
+    if (importing) {
+      const next = parseProject(source);
+      chooseImported(graphToPatch(next.effects));
+      return;
+    }
+    const next = parseProject(source);
+    sceneEditor.replace(next.scene);
+    effectsEditor.replace(next.effects);
+    setSceneRevision((revision) => revision + 1);
+    viewports.current = next.viewports ?? {};
+    setActiveTab(next.activeTab ?? "effects");
+    setPatchName(next.name);
+    setLibrary(null);
+    setImportError(null);
+    requestAnimationFrame(() => {
+      void flow?.setViewport(
+        next.viewports?.[next.activeTab ?? "effects"] ?? {
+          x: 0,
+          y: 0,
+          zoom: 1,
+        },
+      );
+    });
+  };
+  const loadSelected = act(async () =>
+    loadProject(await fetchLocalPatchVersion(selectedPatch, selectedVersion)),
+  );
   const importSubpatch = (entry: { name: string; patch: Patch }) => {
     const node = shaderNodes.create(
       spagbolGroupKinds.group,
@@ -404,7 +525,9 @@ export function NodeEditor() {
       <main
         className={[
           "app-shell",
-          sidePanelOpen && !uiHidden ? "" : "app-shell-panel-closed",
+          sidePanelOpen && !uiHidden && activeTab === "effects"
+            ? ""
+            : "app-shell-panel-closed",
           uiHidden ? "app-shell-ui-hidden" : "",
           visualizationVisible ? "" : "app-shell-visual-hidden",
         ].join(" ")}
@@ -418,7 +541,11 @@ export function NodeEditor() {
       >
         <WebGLPreview
           ref={preview}
-          active={visualizationVisible}
+          active
+          sceneDocument={sceneSnapshot.document}
+          sceneRevision={sceneRevision}
+          previewStage={activeTab}
+          effectsBypass={effectsBypass}
           fragmentShader={compile.shaderCode}
           shaderArgs={compile.shaderArgs}
           feedbackTextureCount={compile.feedbackTextureCount}
@@ -432,45 +559,87 @@ export function NodeEditor() {
         />
         <section
           className="editor-shell"
-          onKeyDownCapture={(event) => {
-            if (
-              event.key.toLowerCase() === "x" &&
-              !event.metaKey &&
-              !event.ctrlKey &&
-              !(event.target as HTMLElement).closest(
-                "input, textarea, select, [contenteditable]",
-              )
-            )
-              event.stopPropagation();
-          }}
+
         >
           <SpagbolCanvas
+            key={activeTab}
             editor={editor}
-            views={shaderViews}
+            views={activeTab === "scene" ? sceneViews : shaderViews}
             linkPresentation={presentation}
-            className="visual-graph"
-            defaultViewport={initial?.ui?.viewport}
+            className={`visual-graph visual-graph-${activeTab}`}
+            defaultViewport={viewports.current?.[activeTab]}
             onInit={setFlow}
             onViewportChange={viewportChanged}
-            features={shaderCanvasFeatures}
+            features={
+              activeTab === "scene"
+                ? { ...shaderCanvasFeatures, areas: true, linkProperties: true, panels: true }
+                : shaderCanvasFeatures
+            }
             controls={{
               buttons,
               leading: (
-                <input
-                  className="patch-name-input"
-                  aria-label={currentGroup ? "Subpatch name" : "Patch name"}
-                  value={
-                    currentGroup ? (currentGroup.label ?? "Group") : patchName
-                  }
-                  onChange={(event) => {
-                    const name = event.target.value;
-                    if (currentGroup)
-                      editor.edit("Rename subpatch", "metadata", (graph) => {
-                        graph.data = { ...graph.data, name };
-                      });
-                    else setPatchName(name);
-                  }}
-                />
+                <>
+                  <div
+                    className="graph-tabs"
+                    role="tablist"
+                    aria-label="Graph stage"
+                  >
+                    {(["scene", "effects"] as const).map((tab) => (
+                      <button
+                        key={tab}
+                        role="tab"
+                        aria-selected={activeTab === tab}
+                        onClick={() => setActiveTab(tab)}
+                      >
+                        {tab === "scene" ? "Scene" : "Effects"}
+                      </button>
+                    ))}
+                  </div>
+                  {activeTab === "scene" && (
+                    <select
+                      aria-label="Active scene camera"
+                      value={String(
+                        sceneSnapshot.document.data?.activeCamera ?? "",
+                      )}
+                      onChange={(e) =>
+                        sceneEditor.edit(
+                          "Select camera",
+                          "metadata",
+                          (graph) => {
+                            graph.data = {
+                              ...graph.data,
+                              activeCamera: e.target.value,
+                            };
+                          },
+                        )
+                      }
+                    >
+                      <option value="">Automatic camera</option>
+                      {sceneSnapshot.document.nodes
+                        .filter((n) => n.kind.endsWith("Camera"))
+                        .map((n) => (
+                          <option key={n.id} value={n.id}>
+                            {n.label ?? n.kind} · {n.id.slice(-5)}
+                          </option>
+                        ))}
+                    </select>
+                  )}
+                  <input
+                    className="patch-name-input"
+                    aria-label={currentGroup ? "Subpatch name" : "Patch name"}
+                    value={
+                      currentGroup ? (currentGroup.label ?? "Group") : patchName
+                    }
+                    onChange={(event) => {
+                      const name = event.target.value;
+                      if (currentGroup)
+                        editor.edit("Rename subpatch", "metadata", (graph) => {
+                          graph.data = { ...graph.data, name };
+                        });
+                      else setPatchName(name);
+                    }}
+                  />
+                </>
               ),
               zoomExtra: <span className="fps-badge">{fps} FPS</span>,
               menuItems: [
@@ -521,9 +690,7 @@ export function NodeEditor() {
               event.target.value = "";
               if (file)
                 void act(async () => {
-                  const next = parsePatchJson(await file.text());
-                  if (importing) chooseImported(next);
-                  else loadPatch(next);
+                  loadProject(await file.text());
                 })();
             }}
           />
@@ -533,11 +700,11 @@ export function NodeEditor() {
             </p>
           ) : null}
         </section>
-        {sidePanelOpen && !uiHidden ? (
+        {sidePanelOpen && !uiHidden && activeTab === "effects" ? (
           <ExportPanel
             shaderCode={compile.shaderCode}
             validation={validation}
-            compileErrors={compile.errors}
+            compileErrors={hasEffectsOutput ? compile.errors : []}
             importError={importError}
           />
         ) : null}
@@ -555,17 +722,12 @@ export function NodeEditor() {
                 <button onClick={() => setNewOpen(false)}>Cancel</button>
                 <button
                   onClick={() => {
-                    loadPatch({
-                      name: "untitled-patch",
-                      nodes: [
-                        demoPatch.nodes[0],
-                        {
-                          ...demoPatch.nodes.at(-1)!,
-                          position: { x: 960, y: 160 },
-                        },
-                      ],
-                      links: [],
-                    });
+                    sceneEditor.replace(emptyScene());
+                    effectsEditor.replace(emptyScene());
+                    setSceneRevision((revision) => revision + 1);
+                    viewports.current = {};
+                    setActiveTab("scene");
+                    setPatchName("untitled-patch");
                     setNewOpen(false);
                   }}
                 >

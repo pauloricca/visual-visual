@@ -9,16 +9,18 @@
     "typecheck": "tsc -b"
   },
   "dependencies": {
-    "@pauloricca/spagbol": "0.1.3",
+    "@pauloricca/spagbol": "0.1.4",
     "@vitejs/plugin-react": "^5.0.0",
     "@xyflow/react": "12.11.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
+    "three": "0.187.0",
     "vite": "^7.0.0"
   },
   "devDependencies": {
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
+    "@types/three": "0.187.0",
     "typescript": "^5.8.3"
   }
 }

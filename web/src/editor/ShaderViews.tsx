@@ -85,6 +85,7 @@ export const shaderViews = Object.fromEntries(
     type,
     defineNodeView({
       autoWidth: true,
+      resizable: true,
       minWidth: 80,
       ...(type === "Expression" ? { body: Expression } : {}),
       ...(type === "Scope" ? { render: Scope } : {}),

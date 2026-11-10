@@ -1,3 +1,4 @@
+import { assertDocument, type GraphDocument } from "@pauloricca/spagbol";
 import type {
   CompileResult,
   ShaderArg,
@@ -5,9 +6,12 @@ import type {
   ShaderDelaySlot,
   ShaderEnvelopeSlot,
   ShaderMediaRequirements,
-} from '../graph/glsl';
+} from "../graph/glsl";
 
 export interface RenderBundle {
+  sceneDocument?: GraphDocument;
+  sceneRevision?: number;
+  effectsBypass?: boolean;
   version: 1;
   revision: number;
   patchName: string;
@@ -56,18 +60,32 @@ export function renderBundleRevision(source: string): number {
 }
 
 export function isRenderBundle(value: unknown): value is RenderBundle {
-  if (!value || typeof value !== 'object') return false;
+  if (!value || typeof value !== "object") return false;
 
   const candidate = value as Partial<RenderBundle>;
-  return candidate.version === 1 &&
-    typeof candidate.revision === 'number' &&
-    typeof candidate.patchName === 'string' &&
-    typeof candidate.shaderCode === 'string' &&
+  if (candidate.sceneDocument) {
+    try {
+      assertDocument(candidate.sceneDocument);
+    } catch {
+      return false;
+    }
+  }
+  if (
+    candidate.effectsBypass !== undefined &&
+    typeof candidate.effectsBypass !== "boolean"
+  )
+    return false;
+  return (
+    candidate.version === 1 &&
+    typeof candidate.revision === "number" &&
+    typeof candidate.patchName === "string" &&
+    typeof candidate.shaderCode === "string" &&
     Array.isArray(candidate.shaderArgs) &&
-    typeof candidate.feedbackTextureCount === 'number' &&
+    typeof candidate.feedbackTextureCount === "number" &&
     Array.isArray(candidate.bufferSlots) &&
     Array.isArray(candidate.delaySlots) &&
     Array.isArray(candidate.envelopeSlots) &&
     !!candidate.media &&
-    typeof candidate.media === 'object';
+    typeof candidate.media === "object"
+  );
 }

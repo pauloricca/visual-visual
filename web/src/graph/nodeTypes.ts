@@ -1,6 +1,11 @@
 import type { NodeDefinition, NodeType, PatchNode } from './types';
 
 export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
+  Scene: {
+    type: 'Scene',
+    inputs: [{ name: 'x', defaultValue: 0 }, { name: 'y', defaultValue: 0 }],
+    outputs: [{ name: 'r' }, { name: 'g' }, { name: 'b' }],
+  },
   System: {
     type: 'System',
     inputs: [],

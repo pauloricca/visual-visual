@@ -310,6 +310,7 @@ interface GlslStatement {
 }
 
 function resolveInput(node: PatchNode, port: string, context: CompileContext): string {
+  if (node.enabled === false) return "0.0";
   const links = context.incoming.get(`${node.id}.${port}`) ?? [];
   if (links.length > 0) {
     return combineInputLinks(node, port, links, context);
@@ -394,7 +395,7 @@ function resolveOutput(nodeId: string, port: string, context: CompileContext): s
   }
 
   context.visiting.add(cacheKey);
-  const expression = emitOutput(node, port, context);
+  const expression = node.enabled === false ? '0.0' : emitOutput(node, port, context);
   context.visiting.delete(cacheKey);
 
   const variable = makeVariableName(node.id, port, context.usedVariables);
@@ -531,6 +532,11 @@ function emitOutput(node: PatchNode, port: string, context: CompileContext): str
       return `fbmNoise3(vec3(${input(node, 'x', context)}, ${input(node, 'y', context)}, ${input(node, 'z', context)}) * max(${input(node, 'scale', context)}, 0.0001) + vec3(${input(node, 'seed', context)} * 17.0, ${input(node, 'seed', context)} * 31.0, ${input(node, 'seed', context)} * 47.0), ${input(node, 'octaves', context)})`;
     case 'Noise3Fast':
       return `fbmNoise3Fast(vec3(${input(node, 'x', context)}, ${input(node, 'y', context)}, ${input(node, 'z', context)}) * max(${input(node, 'scale', context)}, 0.0001) + vec3(${input(node, 'seed', context)} * 17.0, ${input(node, 'seed', context)} * 31.0, ${input(node, 'seed', context)} * 47.0), ${input(node, 'octaves', context)})`;
+    case 'Scene': {
+      const channel = { r: 'r', g: 'g', b: 'b' }[port];
+      if (!channel) throw new Error(`Unsupported scene channel ${port}`);
+      return `texture(u_scene, clamp(vec2(${input(node, 'x', context)}, ${input(node, 'y', context)}), vec2(0.0), vec2(1.0))).${channel}`;
+    }
     case 'Camera':
       return emitCamera(node, port, context);
     case 'Envelope':
@@ -1040,6 +1046,7 @@ ${delayFrameControlOutputs}
     .map((slot) => `uniform sampler2D ${slot.samplerName};`)
     .join('\n');
   const mediaUniforms = [
+    'uniform sampler2D u_scene;',
     media.useMic ? 'uniform float u_mic_level;' : '',
     media.useCamera ? 'uniform sampler2D u_camera;' : '',
   ].filter(Boolean).join('\n');

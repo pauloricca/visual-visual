@@ -11,6 +11,12 @@ export function expandGroups(patch: Patch): Patch {
 }
 
 function expandGroupNodes(patch: Patch, prefix: string): Patch {
+  const mutedGroups = new Set(patch.nodes.filter(n => n.type === 'Group' && n.enabled === false).map(n => n.id));
+  if (mutedGroups.size) patch = {
+    ...patch,
+    nodes: patch.nodes.map(n => mutedGroups.has(n.id) ? { id: n.id, type: 'Constant', params: { value: 0 } } : n),
+    links: patch.links.filter(l => !mutedGroups.has(l.to.node)).map(l => mutedGroups.has(l.from.node) ? { ...l, from: { node: l.from.node, port: 'value' } } : l),
+  };
   const nodes: PatchNode[] = [];
   const links: PatchLink[] = [];
 
@@ -20,7 +26,7 @@ function expandGroupNodes(patch: Patch, prefix: string): Patch {
       continue;
     }
 
-    const groupPatch = expandGroupNodes(node.subpatch, `${prefix}${node.id}__`);
+    const groupPatch = expandGroupNodes(node.enabled === false ? { ...node.subpatch, nodes: node.subpatch.nodes.map(child => ({ ...child, enabled: false })) } : node.subpatch, `${prefix}${node.id}__`);
     const insNodes = groupPatch.nodes.filter((candidate) => candidate.type === 'Ins');
     const outsNodes = groupPatch.nodes.filter((candidate) => candidate.type === 'Outs');
     const boundaryNodeIds = new Set([...insNodes, ...outsNodes].map((candidate) => candidate.id));
@@ -146,6 +152,7 @@ function cloneNode(node: PatchNode): PatchNode {
   return {
     id: node.id,
     type: node.type,
+    ...(node.enabled === false ? { enabled: false } : {}),
     ...(node.subpatchName ? { subpatchName: node.subpatchName } : {}),
     ...(node.subpatchCloneId ? { subpatchCloneId: node.subpatchCloneId } : {}),
     ...(node.expression !== undefined ? { expression: node.expression } : {}),

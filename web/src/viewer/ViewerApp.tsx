@@ -32,6 +32,9 @@ export function ViewerApp() {
     <main className="viewer-shell">
       <WebGLPreview
         active
+        sceneDocument={bundle?.sceneDocument}
+        sceneRevision={bundle?.sceneRevision}
+        effectsBypass={bundle?.effectsBypass}
         fragmentShader={bundle?.shaderCode ?? ''}
         feedbackTextureCount={bundle?.feedbackTextureCount ?? 0}
         shaderArgs={bundle?.shaderArgs ?? []}

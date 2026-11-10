@@ -1,9 +1,15 @@
+import type { GraphDocument } from '@pauloricca/spagbol';
+import { SceneRenderer } from '../scene/SceneRenderer';
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
 import type { ShaderArg, ShaderBufferSlot, ShaderDelaySlot, ShaderEnvelopeSlot, ShaderMediaRequirements, ShaderMeterSlot, ShaderScopeSlot } from '../graph/glsl';
 import { EMPTY_MEDIA_REQUIREMENTS } from '../render/renderBundle';
 
 interface Props {
+  sceneDocument?: GraphDocument;
+  sceneRevision?: number;
+  previewStage?: "scene" | "effects";
+  effectsBypass?: boolean;
   active?: boolean;
   fragmentShader: string;
   feedbackTextureCount?: number;
@@ -34,6 +40,8 @@ interface ProgramState {
   uEnvelopeSamplers: Map<string, WebGLUniformLocation | null>;
   uMicLevel: WebGLUniformLocation | null;
   uCamera: WebGLUniformLocation | null;
+  uScene: WebGLUniformLocation | null;
+  sceneTexture?: WebGLTexture;
   feedbackTextureCount: number;
   bufferSlots: ShaderBufferSlot[];
   delaySlots: ShaderDelaySlot[];
@@ -128,6 +136,10 @@ const MIC_METRIC_SCALE = 1000000;
 export const WebGLPreview = forwardRef<WebGLPreviewHandle, Props>(function WebGLPreview({
   active = true,
   fragmentShader,
+  sceneDocument,
+  sceneRevision = 0,
+  previewStage = "effects",
+  effectsBypass = false,
   feedbackTextureCount = 0,
   shaderArgs = [],
   bufferSlots = [],
@@ -139,6 +151,9 @@ export const WebGLPreview = forwardRef<WebGLPreviewHandle, Props>(function WebGL
   onFpsChange,
   showErrorOverlay = true,
 }: Props, ref) {
+  const pipelineRef = useRef({ sceneDocument, sceneRevision, previewStage, effectsBypass });
+  pipelineRef.current = { sceneDocument, sceneRevision, previewStage, effectsBypass };
+  const [contextGeneration, setContextGeneration] = useState(0);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const glRef = useRef<WebGL2RenderingContext | null>(null);
   const vaoRef = useRef<WebGLVertexArrayObject | null>(null);
@@ -174,6 +189,8 @@ export const WebGLPreview = forwardRef<WebGLPreviewHandle, Props>(function WebGL
   const frameRef = useRef(0);
   const startedAtRef = useRef(performance.now());
   const fpsSampleRef = useRef({ frames: 0, lastTime: performance.now() });
+  const [sceneError, setSceneError] = useState('');
+  const sceneErrorRef = useRef('');
   const [error, setError] = useState<string | null>(null);
 
   useImperativeHandle(ref, () => ({
@@ -201,6 +218,16 @@ export const WebGLPreview = forwardRef<WebGLPreviewHandle, Props>(function WebGL
       }, 'image/png');
     },
   }), []);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const lost = (event: Event) => { event.preventDefault(); cancelAnimationFrame(animationFrameRef.current); animationFrameRef.current = 0; setError('Graphics context lost. Waiting for recovery…'); };
+    const restored = () => { setError(null); setContextGeneration(generation => generation + 1); };
+    canvas.addEventListener('webglcontextlost', lost);
+    canvas.addEventListener('webglcontextrestored', restored);
+    return () => { canvas.removeEventListener('webglcontextlost', lost); canvas.removeEventListener('webglcontextrestored', restored); };
+  }, []);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -234,6 +261,8 @@ export const WebGLPreview = forwardRef<WebGLPreviewHandle, Props>(function WebGL
       uInitialPass: gl.getUniformLocation(reduceProgram, 'u_initial_pass'),
     };
 
+    let scene: SceneRenderer | undefined;
+    let revision = pipelineRef.current.sceneRevision;
     let disposed = false;
     const render = () => {
       if (disposed || !activeRef.current) {
@@ -242,7 +271,25 @@ export const WebGLPreview = forwardRef<WebGLPreviewHandle, Props>(function WebGL
       }
 
       resizeCanvasToDisplaySize(canvas, gl);
+      const pipeline = pipelineRef.current;
+      let sceneTexture: WebGLTexture | undefined;
+      try {
+        if (pipeline.sceneRevision !== revision) {
+          scene?.dispose(); scene = undefined; revision = pipeline.sceneRevision;
+        }
+        if (pipeline.sceneDocument) {
+          scene ??= new SceneRenderer(gl, canvas);
+          sceneTexture = scene.render(pipeline.sceneDocument, canvas.width, canvas.height, (performance.now() - startedAtRef.current) / 1000);
+          const message = scene.errors.join(' · ');
+          if (message !== sceneErrorRef.current) { sceneErrorRef.current = message; setSceneError(message); }
+          gl.bindVertexArray(vaoRef.current);
+        }
+      } catch (caught) {
+        const message = caught instanceof Error ? caught.message : String(caught);
+        if (message !== sceneErrorRef.current) { sceneErrorRef.current = message; setSceneError(message); }
+      }
       const program = programRef.current;
+      if (program) program.sceneTexture = sceneTexture;
       if (program) {
         try {
           gl.bindVertexArray(vaoRef.current);
@@ -324,6 +371,15 @@ export const WebGLPreview = forwardRef<WebGLPreviewHandle, Props>(function WebGL
         gl.clearColor(0, 0, 0, 1);
         gl.clear(gl.COLOR_BUFFER_BIT);
       }
+      if (sceneTexture && (pipeline.previewStage === 'scene' || pipeline.effectsBypass)) {
+        gl.bindVertexArray(vaoRef.current);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.drawBuffers([gl.BACK]);
+        gl.viewport(0, 0, canvas.width, canvas.height);
+        const blit = blitProgramRef.current!;
+        gl.useProgram(blit.program); gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, sceneTexture); gl.uniform1i(blit.uTexture, 0);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+      }
       updateFps(fpsSampleRef.current, onFpsChangeRef.current);
       animationFrameRef.current = requestAnimationFrame(render);
     };
@@ -338,6 +394,7 @@ export const WebGLPreview = forwardRef<WebGLPreviewHandle, Props>(function WebGL
 
     return () => {
       disposed = true;
+      scene?.dispose();
       cancelAnimationFrame(animationFrameRef.current);
       animationFrameRef.current = 0;
       startRenderLoopRef.current = null;
@@ -365,7 +422,7 @@ export const WebGLPreview = forwardRef<WebGLPreviewHandle, Props>(function WebGL
       }
       glRef.current = null;
     };
-  }, []);
+  }, [contextGeneration]);
 
   useEffect(() => {
     activeRef.current = active;
@@ -474,7 +531,14 @@ export const WebGLPreview = forwardRef<WebGLPreviewHandle, Props>(function WebGL
 
   useEffect(() => {
     const gl = glRef.current;
-    if (!active || !gl || !fragmentShader) return;
+    if (!active || !gl) return;
+    if (!fragmentShader) {
+      if (programRef.current) gl.deleteProgram(programRef.current.program);
+      programRef.current = null;
+      if (stateResourcesRef.current) disposeStateResources(gl, stateResourcesRef.current);
+      stateResourcesRef.current = null;
+      return;
+    }
 
     try {
       const nextProgram = createProgram(gl, fragmentShader);
@@ -505,6 +569,7 @@ export const WebGLPreview = forwardRef<WebGLPreviewHandle, Props>(function WebGL
         ])),
         uMicLevel: gl.getUniformLocation(nextProgram, 'u_mic_level'),
         uCamera: gl.getUniformLocation(nextProgram, 'u_camera'),
+        uScene: gl.getUniformLocation(nextProgram, 'u_scene'),
         feedbackTextureCount,
         bufferSlots: bufferSlotsRef.current,
         delaySlots: delaySlotsRef.current,
@@ -525,12 +590,12 @@ export const WebGLPreview = forwardRef<WebGLPreviewHandle, Props>(function WebGL
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     }
-  }, [active, feedbackTextureCount, fragmentShader]);
+  }, [active, feedbackTextureCount, fragmentShader, contextGeneration]);
 
   return (
     <>
       <canvas ref={canvasRef} className="webgl-preview" aria-hidden="true" />
-      {showErrorOverlay && error ? <div className="webgl-error">{error}</div> : null}
+      {showErrorOverlay && (error || sceneError) ? <div className="webgl-error">{error || sceneError}</div> : null}
     </>
   );
 });
@@ -748,6 +813,12 @@ function setCommonUniforms(
   frame: number,
   startedAt: number,
 ): void {
+  if (program.uScene && program.sceneTexture) {
+    const unit = (gl.getParameter(gl.MAX_TEXTURE_IMAGE_UNITS) as number) - 1;
+    const occupied = program.feedbackTextureCount + program.delaySlots.length + program.bufferSlots.length + program.envelopeSlots.length + Number(program.mediaRequirements.useCamera);
+    if (occupied > unit) throw new Error('Scene input exceeds available GPU texture units.');
+    gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTexture(gl.TEXTURE_2D, program.sceneTexture); gl.uniform1i(program.uScene, unit);
+  }
   gl.uniform2f(program.uResolution, canvas.width, canvas.height);
   gl.uniform1f(program.uTime, (performance.now() - startedAt) / 1000);
   gl.uniform1i(program.uFrame, frame);

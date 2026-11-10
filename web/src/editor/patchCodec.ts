@@ -16,6 +16,7 @@ import {
 } from "../graph/nodeTypes";
 import { extractExpressionInputs } from "../graph/expression";
 import { parsePatchJson } from "../graph/parse";
+import { migrateSceneRenderNodes } from "./migrateSceneNodes";
 import type {
   Patch,
   PatchNode,
@@ -91,11 +92,13 @@ export function patchToGraph(patch: Patch): GraphDocument {
         inputs,
         outputs,
         expression,
+        enabled,
       }) => {
         const dynamic = ["Group", "Ins", "Outs"].includes(type);
         return {
           id,
           kind: nodeKind(type),
+          ...(enabled === false ? { enabled: false } : {}),
           position: position ?? { x: 0, y: 0 },
           values: { ...params },
           data: {
@@ -183,6 +186,7 @@ export function graphToPatch(graph: GraphDocument): Patch {
       return {
         id: node.id,
         type,
+        ...(node.enabled === false ? { enabled: false } : {}),
         params: Object.fromEntries(
           Object.entries(node.values).map(([id, value]) => [
             portName(node.id, id, type === "Ins" ? "output" : "input"),
@@ -255,6 +259,7 @@ export function readEditorState(): {
       try {
         const state = JSON.parse(current);
         assertDocument(state.document);
+        migrateSceneRenderNodes(state.document);
         normalizeShaderDocument(state.document, state.document);
         return state;
       } catch {
@@ -335,14 +340,13 @@ export function readEditorState(): {
   }
 }
 
-// The shader patch contract has no node/link enabled state. Keep unsupported core toggles
-// inert instead of allowing a visual mute that leaves the shader running.
+// Keep nested graph titles synchronized; enabled state belongs to the document.
 export function normalizeShaderDocument(
   document: GraphDocument,
   previous: GraphDocument,
 ): void {
   for (const node of document.nodes) {
-    delete node.enabled;
+
     if (node.graph) {
       const before = previous.nodes.find((item) => item.id === node.id);
       if (
@@ -353,5 +357,5 @@ export function normalizeShaderDocument(
       normalizeShaderDocument(node.graph, before?.graph ?? node.graph);
     }
   }
-  for (const link of document.links) delete link.enabled;
+
 }

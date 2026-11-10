@@ -82,6 +82,7 @@ function parsePatchNode(value: unknown, index: number): Patch["nodes"][number] {
       : value.params;
 
   return {
+    ...(value.enabled === false ? { enabled: false } : {}),
     id: value.id,
     type: value.type,
     ...(value.subpatchName ? { subpatchName: value.subpatchName } : {}),

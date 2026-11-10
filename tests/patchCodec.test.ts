@@ -1,3 +1,4 @@
+import './scene.test';
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
@@ -14,6 +15,7 @@ import {
   readEditorState,
 } from "../web/src/editor/patchCodec";
 import { parsePatchJson } from "../web/src/graph/parse";
+import { parseProject } from "../web/src/scene/project";
 import { compilePatchToGlsl } from "../web/src/graph/glsl";
 import { validatePatch } from "../web/src/graph/validate";
 import { demoPatch } from "../web/src/graph/demoPatch";
@@ -32,7 +34,11 @@ for (const path of [
   ...(existsSync("patches") ? files("patches") : []),
 ])
   test(`shader and validation parity: ${path}`, () => {
-    const patch = parsePatchJson(readFileSync(path, "utf8"));
+    const source = readFileSync(path, "utf8");
+    const saved = JSON.parse(source);
+    const patch = saved.format === "visual-visual"
+      ? graphToPatch(parseProject(source).effects)
+      : parsePatchJson(source);
     const converted = graphToPatch(patchToGraph(patch));
     assert.deepEqual(validatePatch(converted), validatePatch(patch));
     const before = compilePatchToGlsl(patch, "webgl2");

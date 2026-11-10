@@ -556,14 +556,25 @@ select:hover {
 .visual-graph .spagbol-node-frame-ports { gap: 8px; }
 .visual-graph .spagbol-node-frame-header { min-height: 31px; }
 .visual-graph .spagbol-node-frame-body { position: relative; }
-.fps-badge { display: flex; align-items: center; min-height: 28px; padding: 0 8px; border: 1px solid #fff; background: var(--surface-bg); white-space: nowrap; }
+.visual-graph .spagbol-control-zoom-extras { flex-direction: row-reverse; align-items: center; }
+.fps-badge { display: flex; align-items: center; height: var(--spagbol-control-size, 30px); margin-left: -1px; padding: 0 8px; border: 1px solid #fff; background: var(--surface-bg); white-space: nowrap; }
 .expression-input { width: 100%; min-width: 150px; padding: 6px; }
 .scope-preview { width: 220px; height: 128px; pointer-events: none; }
 .meter-label { padding: 8px; min-width: 120px; font-variant-numeric: tabular-nums; }
 .editor-error { position: absolute; left: 14px; top: 14px; padding: 8px; background: #000; color: #ff7474; z-index: 40; }
-.app-shell-ui-hidden .editor-shell { visibility: hidden; }
+.app-shell-ui-hidden .editor-shell { opacity: 0; pointer-events: none; }
 
 /* These actions have no meaning in the legacy shader contract. */
-.visual-graph .spagbol-node-frame-enabled,
-.visual-graph .spagbol-canvas-link-controls-enabled { display: none; }
+
 .midi-value { display: block; padding: 8px; font-variant-numeric: tabular-nums; }
+
+.graph-tabs { display: flex; gap: 0; }
+.graph-tabs button[aria-selected="true"] { background: #eee; color: #111; }
+.scene-config { border: 0; padding: 6px; margin: 0; display: flex; flex-direction: column; gap: 6px; min-width: 160px; }
+.scene-config input:not([type="checkbox"]), .scene-config select { width: 100%; min-width: 0; }
+.scene-config label { display: flex; align-items: center; gap: 6px; }
+.painty-layers { border: 0; padding: 0; margin: 0; min-width: 0; display: flex; flex-direction: column; gap: 4px; max-height: 220px; overflow-y: auto; }
+.painty-layers legend { padding: 0 0 4px; }
+.painty-layers label span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scene-config .spagbol-curve-editor { width: 300px; }
+.scene-config .spagbol-control-joystick { width: 160px; height: 120px; }

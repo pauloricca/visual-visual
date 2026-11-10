@@ -67,6 +67,16 @@ All ports are floats. `params` store default values for unconnected inputs and f
 
 ## Shared graph UI
 
-The editor now consumes `@pauloricca/spagbol@0.1.3`. Visual Visual owns the shader node catalogue and patch adapter; Spagbol owns graph presentation and editing. Existing patch files and v1 browser state remain supported. New browser sessions persist the shared document under `visual-visual.editor-state.v2`, leaving v1 data intact.
+The editor now consumes `@pauloricca/spagbol@0.1.4`. Visual Visual owns the shader node catalogue and patch adapter; Spagbol owns graph presentation and editing. Existing patch files and v1 browser state remain supported. New browser sessions persist the shared document under `visual-visual.editor-state.v2`, leaving v1 data intact.
 
 Run `npm test` for patch/compiler compatibility checks. The before/after screenshots, interaction measurements, known package gaps and reproduction commands are in [the migration report](benchmarks/REPORT.md). Spagbol 0.1.1 includes the verified node-drag performance fix. The dependency and lockfile use the published npm package, and a clean install matches the tested build. See the report for measurements and remaining UI differences.
+
+## Scene editor
+
+The **Scene** tab builds a declarative 3D scene; **Effects** processes its GPU render texture. Both display their own live output behind the existing Spagbol graph canvas. New projects start in Scene. Add a Sphere to see it immediately, then use a **Scene** node in Effects: connect **Sys ins.x/y** to **Scene.x/y** and its **r/g/b** outputs to **Sys outs**. Scene samples the image at those normalized 0–1 coordinates for each output pixel, so coordinate transformations before Scene warp the image. Empty or bypassed Effects passes the scene through.
+
+See [Scene editor architecture and execution profile](docs/scene-editor.md) for the node catalogue, scope lifecycle, asset storage, project compatibility and browser verification.
+
+Node input labels and value controls use Spagbol’s shared columns: numeric controls align after the widest label on each node.
+
+Both the dependency manifest and lockfile use the published npm release `0.1.4`; local Spagbol vendor archives are no longer required.

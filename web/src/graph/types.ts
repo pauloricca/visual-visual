@@ -1,4 +1,5 @@
 export type NodeType =
+  | 'Scene'
   | 'System'
   | 'Output'
   | 'Expression'
@@ -71,6 +72,7 @@ export interface Vec2 {
 }
 
 export interface PatchNode {
+  enabled?: boolean;
   id: string;
   type: NodeType;
   subpatchName?: string;
